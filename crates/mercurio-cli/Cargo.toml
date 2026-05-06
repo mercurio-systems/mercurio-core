@@ -12,5 +12,7 @@ path = "src/main.rs"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
 mercurio-core = { path = "../mercurio-core" }
+mercurio-server = { path = "../mercurio-server" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+tokio.workspace = true

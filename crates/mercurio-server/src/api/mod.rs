@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ops::{Deref, DerefMut};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{
@@ -473,7 +474,103 @@ pub(crate) struct CompiledWorkspaceFile {
     pub(crate) document: Option<KirDocument>,
 }
 
-pub type ServerState = WorkspaceService;
+#[derive(Debug)]
+pub struct ServerState {
+    default_workspace: WorkspaceService,
+    workspaces: HashMap<String, Arc<RwLock<WorkspaceService>>>,
+    next_workspace_number: u64,
+}
+
+impl ServerState {
+    pub fn new(default_workspace: WorkspaceService) -> Self {
+        Self {
+            default_workspace,
+            workspaces: HashMap::new(),
+            next_workspace_number: 1,
+        }
+    }
+
+    fn replace_default_workspace(&mut self, workspace: WorkspaceService) {
+        self.default_workspace = workspace;
+    }
+
+    fn open_workspace(
+        &mut self,
+        path: &Path,
+        mode: WorkspaceOpenMode,
+    ) -> Result<WorkspaceOpenResponse, ApiError> {
+        let workspace = workspace_from_open_mode(path, mode)?;
+        let workspace_id = self.next_workspace_id();
+        let status = workspace_status_for(&workspace);
+        self.workspaces
+            .insert(workspace_id.clone(), Arc::new(RwLock::new(workspace)));
+        Ok(WorkspaceOpenResponse {
+            workspace_id,
+            workspace_root: status.workspace_root,
+            active_path: status.active_path,
+            project: status.project,
+        })
+    }
+
+    fn list_workspaces(&self) -> Vec<WorkspaceSummaryDto> {
+        let mut workspaces = self
+            .workspaces
+            .iter()
+            .map(|(workspace_id, workspace)| {
+                let workspace = read_workspace_state(workspace);
+                let status = workspace_status_for(&workspace);
+                WorkspaceSummaryDto {
+                    workspace_id: workspace_id.clone(),
+                    workspace_root: status.workspace_root.unwrap_or_default(),
+                    active_path: status.active_path,
+                    project: status.project,
+                }
+            })
+            .collect::<Vec<_>>();
+        workspaces.sort_by(|left, right| left.workspace_id.cmp(&right.workspace_id));
+        workspaces
+    }
+
+    fn workspace(&self, workspace_id: &str) -> Result<Arc<RwLock<WorkspaceService>>, ApiError> {
+        self.workspaces
+            .get(workspace_id)
+            .cloned()
+            .ok_or_else(|| ApiError::MissingWorkspace(workspace_id.to_string()))
+    }
+
+    fn delete_workspace(&mut self, workspace_id: &str) -> Result<(), ApiError> {
+        self.workspaces
+            .remove(workspace_id)
+            .map(|_| ())
+            .ok_or_else(|| ApiError::MissingWorkspace(workspace_id.to_string()))
+    }
+
+    fn next_workspace_id(&mut self) -> String {
+        let id = format!("ws_{:016x}", self.next_workspace_number);
+        self.next_workspace_number += 1;
+        id
+    }
+}
+
+impl From<WorkspaceService> for ServerState {
+    fn from(value: WorkspaceService) -> Self {
+        Self::new(value)
+    }
+}
+
+impl Deref for ServerState {
+    type Target = WorkspaceService;
+
+    fn deref(&self) -> &Self::Target {
+        &self.default_workspace
+    }
+}
+
+impl DerefMut for ServerState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.default_workspace
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum GraphScope {
@@ -519,6 +616,7 @@ pub enum ApiError {
     Ai(String),
     MissingElement(String),
     MissingEditorFile(String),
+    MissingWorkspace(String),
     InvalidPath(String),
     AlreadyExists(String),
 }
@@ -528,6 +626,7 @@ impl std::fmt::Display for ApiError {
         match self {
             Self::MissingElement(id) => write!(f, "element not found: {id}"),
             Self::MissingEditorFile(path) => write!(f, "editor file not found: {path}"),
+            Self::MissingWorkspace(id) => write!(f, "workspace not found: {id}"),
             Self::InvalidPath(path) => write!(f, "invalid editor path: {path}"),
             Self::AlreadyExists(path) => write!(f, "editor file already exists: {path}"),
             Self::Diagnostic(err) => write!(f, "{err}"),
@@ -845,7 +944,7 @@ pub fn load_app_state(model_path: &Path) -> Result<AppState, ApiError> {
 }
 
 pub fn load_server_state(model_path: &Path) -> Result<ServerState, ApiError> {
-    crate::workspace::load_workspace_service(model_path)
+    crate::workspace::load_workspace_service(model_path).map(ServerState::new)
 }
 
 #[derive(Debug, Deserialize)]
@@ -920,6 +1019,7 @@ struct EditorRefreshRequest {
 #[derive(Debug, Deserialize)]
 struct OpenWorkspaceRequest {
     path: String,
+    mode: Option<WorkspaceOpenMode>,
 }
 
 #[derive(Debug, Serialize)]
@@ -931,12 +1031,52 @@ struct WorkspaceStatus {
     project: Option<WorkspaceProjectInfoDto>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum WorkspaceOpenMode {
+    Shell,
+    Lazy,
+    Compiled,
+}
+
+impl Default for WorkspaceOpenMode {
+    fn default() -> Self {
+        Self::Lazy
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceOpenResponse {
+    workspace_id: String,
+    workspace_root: Option<String>,
+    active_path: Option<String>,
+    project: Option<WorkspaceProjectInfoDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSummaryDto {
+    workspace_id: String,
+    workspace_root: String,
+    active_path: Option<String>,
+    project: Option<WorkspaceProjectInfoDto>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HealthStatus {
     service: String,
     version: String,
     status: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionStatus {
+    service: String,
+    version: String,
+    api_version: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1930,6 +2070,9 @@ impl IntoResponse for HttpApiError {
                 StatusCode::NOT_FOUND,
                 format!("editor file not found: {path}"),
             ),
+            ApiError::MissingWorkspace(id) => {
+                (StatusCode::NOT_FOUND, format!("workspace not found: {id}"))
+            }
             ApiError::InvalidPath(path) => (
                 StatusCode::BAD_REQUEST,
                 format!("invalid editor path: {path}"),
@@ -2023,6 +2166,9 @@ fn package_error_from_api_error(error: ApiError) -> PackageApiError {
         ApiError::MissingEditorFile(path) => {
             PackageApiError::not_found(format!("server project file not found: {path}"))
         }
+        ApiError::MissingWorkspace(id) => {
+            PackageApiError::not_found(format!("workspace not found: {id}"))
+        }
         ApiError::InvalidPath(path) => {
             PackageApiError::bad_request(format!("invalid server project path: {path}"))
         }
@@ -2033,9 +2179,11 @@ fn package_error_from_api_error(error: ApiError) -> PackageApiError {
     }
 }
 
-pub fn build_router(state: ServerState) -> Router {
+pub fn build_router(state: impl Into<ServerState>) -> Router {
+    let state = state.into();
     Router::new()
         .route("/api/health", get(get_health))
+        .route("/api/version", get(get_version))
         .route("/api/session/current-user", get(get_current_user))
         .route("/api/session/login", post(post_session_login))
         .route(
@@ -2054,6 +2202,70 @@ pub fn build_router(state: ServerState) -> Router {
             get(get_default_workspace_path),
         )
         .route("/api/workspace/open", post(open_workspace))
+        .route(
+            "/api/workspaces",
+            get(list_workspaces).post(open_scoped_workspace),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}",
+            get(get_scoped_workspace).delete(delete_scoped_workspace),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/model",
+            get(get_scoped_model),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/graph",
+            get(get_scoped_graph),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/elements/{id}",
+            get(get_scoped_element),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/search",
+            get(search_scoped_elements),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/files",
+            get(get_scoped_editor_files).post(create_scoped_editor_file),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/file",
+            get(get_scoped_editor_file).put(put_scoped_editor_file),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/parse",
+            post(parse_scoped_editor_content),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/format",
+            post(format_scoped_editor_content),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/semantic-compile",
+            post(compile_scoped_editor_semantic_content),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/lint",
+            post(lint_scoped_editor_content),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/refresh",
+            post(refresh_scoped_editor_model),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/semantic/workspace-session",
+            get(get_scoped_semantic_workspace_session),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/semantic/project/compile",
+            post(compile_scoped_semantic_project),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/semantic/project/lint",
+            post(lint_scoped_semantic_project),
+        )
         .route("/api/model", get(get_model))
         .route("/api/graph", get(get_graph))
         .route("/api/diagrams/kinds", get(get_diagram_kinds))
@@ -2236,6 +2448,14 @@ async fn get_health() -> Json<HealthStatus> {
         service: "mercurio-core".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         status: "ok".to_string(),
+    })
+}
+
+async fn get_version() -> Json<VersionStatus> {
+    Json(VersionStatus {
+        service: "mercurio-core".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        api_version: 1,
     })
 }
 
@@ -3851,8 +4071,94 @@ async fn open_workspace(
     Json(request): Json<OpenWorkspaceRequest>,
 ) -> Result<Json<WorkspaceStatus>, HttpApiError> {
     let mut state = write_server_state(&state);
-    *state = WorkspaceService::from_open_path(Path::new(&request.path))?;
+    let workspace =
+        workspace_from_open_mode(Path::new(&request.path), request.mode.unwrap_or_default())?;
+    state.replace_default_workspace(workspace);
     Ok(Json(workspace_status(&state)))
+}
+
+async fn list_workspaces(
+    State(state): State<Arc<RwLock<ServerState>>>,
+) -> Result<Json<Vec<WorkspaceSummaryDto>>, HttpApiError> {
+    let state = read_server_state(&state);
+    Ok(Json(state.list_workspaces()))
+}
+
+async fn open_scoped_workspace(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    Json(request): Json<OpenWorkspaceRequest>,
+) -> Result<Json<WorkspaceOpenResponse>, HttpApiError> {
+    let mut state = write_server_state(&state);
+    Ok(Json(state.open_workspace(
+        Path::new(&request.path),
+        request.mode.unwrap_or_default(),
+    )?))
+}
+
+async fn get_scoped_workspace(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<Json<WorkspaceSummaryDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    let status = workspace_status_for(&workspace);
+    Ok(Json(WorkspaceSummaryDto {
+        workspace_id,
+        workspace_root: status.workspace_root.unwrap_or_default(),
+        active_path: status.active_path,
+        project: status.project,
+    }))
+}
+
+async fn delete_scoped_workspace(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<StatusCode, HttpApiError> {
+    let mut state = write_server_state(&state);
+    state.delete_workspace(&workspace_id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_scoped_model(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<Json<ModelMetadataDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.model_metadata()))
+}
+
+async fn get_scoped_graph(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<GraphQuery>,
+) -> Result<Json<GraphDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.graph(
+        query.scope.as_deref().unwrap_or(GraphScope::L2.as_str()),
+    )))
+}
+
+async fn get_scoped_element(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath((workspace_id, id)): AxumPath<(String, String)>,
+) -> Result<Json<ElementDetailsDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.element(&id)?))
+}
+
+async fn search_scoped_elements(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Vec<SearchResultDto>>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(
+        workspace.search(query.q.as_deref().unwrap_or_default()),
+    ))
 }
 
 async fn get_model(
@@ -3968,6 +4274,144 @@ async fn get_semantic_workspace_session(
 ) -> Result<Json<SemanticWorkspaceSessionDto>, HttpApiError> {
     let state = read_server_state(&state);
     Ok(Json(state.semantic_workspace_session()?))
+}
+
+async fn get_scoped_editor_files(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<Json<EditorFileListDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.list_editor_files()?))
+}
+
+async fn create_scoped_editor_file(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<CreateEditorFileRequest>,
+) -> Result<Json<EditorFileContentDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let mut workspace = write_workspace_state(&workspace);
+    Ok(Json(workspace.create_editor_file(
+        &request.path,
+        request.template.as_deref(),
+    )?))
+}
+
+async fn get_scoped_editor_file(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<EditorPathQuery>,
+) -> Result<Json<EditorFileContentDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.read_editor_file(&query.path)?))
+}
+
+async fn put_scoped_editor_file(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<EditorPathQuery>,
+    Json(request): Json<UpdateEditorFileRequest>,
+) -> Result<StatusCode, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let mut workspace = write_workspace_state(&workspace);
+    workspace.write_editor_file(&query.path, &request.content)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn parse_scoped_editor_content(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<EditorParseRequest>,
+) -> Result<Json<EditorParseResponseDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(
+        workspace.parse_editor_content(&request.path, &request.content)?,
+    ))
+}
+
+async fn format_scoped_editor_content(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<EditorParseRequest>,
+) -> Result<Json<EditorFormatResponseDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(
+        workspace.format_editor_content(&request.path, &request.content)?,
+    ))
+}
+
+async fn compile_scoped_editor_semantic_content(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<EditorParseRequest>,
+) -> Result<Json<EditorSemanticCompileResponseDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.compile_editor_semantic_content(
+        &request.path,
+        &request.content,
+    )?))
+}
+
+async fn lint_scoped_editor_content(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<EditorParseRequest>,
+) -> Result<Json<EditorLintResponseDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(
+        workspace.lint_editor_content(&request.path, &request.content)?,
+    ))
+}
+
+async fn refresh_scoped_editor_model(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<EditorRefreshRequest>,
+) -> Result<Json<EditorRefreshResponseDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let mut workspace = write_workspace_state(&workspace);
+    Ok(Json(workspace.refresh_from_editor_path(&request.path)?))
+}
+
+async fn get_scoped_semantic_workspace_session(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<Json<SemanticWorkspaceSessionDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.semantic_workspace_session()?))
+}
+
+async fn compile_scoped_semantic_project(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<SemanticProjectCompileRequestDto>,
+) -> Result<Json<SemanticProjectCompileResponseDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.compile_project_scope(
+        &request.project_path,
+        &request.staged_files,
+    )?))
+}
+
+async fn lint_scoped_semantic_project(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<SemanticProjectCompileRequestDto>,
+) -> Result<Json<ProjectLintResponseDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.lint_project_scope(
+        &request.project_path,
+        &request.staged_files,
+    )?))
 }
 
 async fn create_editor_file(
@@ -4603,11 +5047,26 @@ async fn commit_v2_proposal_changes(
 }
 
 fn workspace_status(state: &ServerState) -> WorkspaceStatus {
+    workspace_status_for(state)
+}
+
+fn workspace_status_for(workspace: &WorkspaceService) -> WorkspaceStatus {
     WorkspaceStatus {
         is_open: true,
-        workspace_root: Some(state.workspace_root().display().to_string()),
-        active_path: state.active_path(),
-        project: Some(state.project_info()),
+        workspace_root: Some(workspace.workspace_root().display().to_string()),
+        active_path: workspace.active_path(),
+        project: Some(workspace.project_info()),
+    }
+}
+
+fn workspace_from_open_mode(
+    path: &Path,
+    mode: WorkspaceOpenMode,
+) -> Result<WorkspaceService, ApiError> {
+    match mode {
+        WorkspaceOpenMode::Shell => WorkspaceService::from_workspace_root_shell(path),
+        WorkspaceOpenMode::Lazy => WorkspaceService::from_open_path_lazy_model_sources(path),
+        WorkspaceOpenMode::Compiled => WorkspaceService::from_workspace_root_compiled(path),
     }
 }
 
@@ -7473,6 +7932,37 @@ fn write_server_state(state: &Arc<RwLock<ServerState>>) -> RwLockWriteGuard<'_, 
     }
 }
 
+fn workspace_handle(
+    state: &Arc<RwLock<ServerState>>,
+    workspace_id: &str,
+) -> Result<Arc<RwLock<WorkspaceService>>, ApiError> {
+    read_server_state(state).workspace(workspace_id)
+}
+
+fn read_workspace_state(
+    workspace: &Arc<RwLock<WorkspaceService>>,
+) -> RwLockReadGuard<'_, WorkspaceService> {
+    match workspace.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("Workspace state lock was poisoned; recovering read access");
+            poisoned.into_inner()
+        }
+    }
+}
+
+fn write_workspace_state(
+    workspace: &Arc<RwLock<WorkspaceService>>,
+) -> RwLockWriteGuard<'_, WorkspaceService> {
+    match workspace.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("Workspace state lock was poisoned; recovering write access");
+            poisoned.into_inner()
+        }
+    }
+}
+
 fn build_metadata(graph: &Graph, stdlib_document: &KirDocument) -> ModelMetadataDto {
     let layers = graph
         .elements()
@@ -9185,6 +9675,38 @@ mod tests {
         root
     }
 
+    async fn response_json(response: axum::response::Response) -> Value {
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    async fn open_test_workspace(app: axum::Router, root: &std::path::Path) -> String {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "path": root.display().to_string(),
+                            "mode": "lazy"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response_json(response)
+            .await
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string()
+    }
+
     fn run_test_git(root: &std::path::Path, args: &[&str]) {
         let output = Command::new("git")
             .args(args)
@@ -10438,6 +10960,137 @@ mod tests {
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["service"], "mercurio-core");
         assert_eq!(body["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn version_endpoint_returns_api_version() {
+        let app = build_router(sample_state());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/version")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["service"], "mercurio-core");
+        assert_eq!(body["apiVersion"], 1);
+    }
+
+    #[tokio::test]
+    async fn workspace_scoped_routes_keep_projects_isolated() {
+        let first_path = temp_workspace_named_file("multi_workspace_a", "model.sysml");
+        let second_path = temp_workspace_named_file("multi_workspace_b", "model.sysml");
+        let first_root = first_path.parent().unwrap().to_path_buf();
+        let second_root = second_path.parent().unwrap().to_path_buf();
+        std::fs::write(&first_path, "package Alpha {\n  part def First;\n}\n").unwrap();
+        std::fs::write(&second_path, "package Beta {\n  part def Second;\n}\n").unwrap();
+
+        let app = build_router(sample_state());
+        let first_id = open_test_workspace(app.clone(), &first_root).await;
+        let second_id = open_test_workspace(app.clone(), &second_root).await;
+        assert_ne!(first_id, second_id);
+
+        let first_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/workspaces/{first_id}/semantic/project/compile"
+                    ))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "project_path": ".",
+                            "staged_files": []
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first_response.status(), StatusCode::OK);
+        let first_json = response_json(first_response).await;
+        assert_eq!(first_json["file_count"], 1);
+        assert_eq!(first_json["results"][0]["path"], "model.sysml");
+
+        let second_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/workspaces/{second_id}/semantic/project/compile"
+                    ))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "project_path": ".",
+                            "staged_files": []
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_response.status(), StatusCode::OK);
+        let second_json = response_json(second_response).await;
+        assert_eq!(second_json["file_count"], 1);
+        assert_eq!(second_json["results"][0]["path"], "model.sysml");
+
+        std::fs::remove_dir_all(first_root).unwrap();
+        std::fs::remove_dir_all(second_root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn workspace_scoped_staged_compile_does_not_write_file() {
+        let model_path = temp_workspace_named_file("staged_workspace", "model.sysml");
+        let workspace_root = model_path.parent().unwrap().to_path_buf();
+        let original = "package Demo {\n}\n";
+        let staged = "package Demo {\n  part def Vehicle;\n}\n";
+        std::fs::write(&model_path, original).unwrap();
+
+        let app = build_router(sample_state());
+        let workspace_id = open_test_workspace(app.clone(), &workspace_root).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/workspaces/{workspace_id}/semantic/project/compile"
+                    ))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "project_path": ".",
+                            "staged_files": [
+                                {
+                                    "path": "model.sysml",
+                                    "content": staged
+                                }
+                            ]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["file_count"], 1);
+        assert_eq!(std::fs::read_to_string(&model_path).unwrap(), original);
+
+        std::fs::remove_dir_all(workspace_root).unwrap();
     }
 
     #[tokio::test]
