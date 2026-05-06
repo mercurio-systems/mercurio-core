@@ -1,14 +1,18 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 use std::fmt;
 
 use serde_json::{Number, Value};
 
+use crate::datalog::{
+    DatalogError, DerivedIndexes, RulePack, load_default_rulepacks, materialize_core_indexes,
+};
 use crate::graph::{Graph, GraphError};
 use crate::ir::KirDocument;
 
 #[derive(Debug, Clone)]
 pub struct Runtime {
     graph: Graph,
+    derived: DerivedIndexes,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -26,6 +30,7 @@ pub struct QueryResult<T> {
 #[derive(Debug)]
 pub enum RuntimeError {
     Graph(GraphError),
+    Datalog(DatalogError),
     InvalidExpression(String),
     MissingElement(String),
     UnsupportedAggregation(String),
@@ -36,6 +41,7 @@ impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Graph(err) => write!(f, "{err}"),
+            Self::Datalog(err) => write!(f, "{err}"),
             Self::InvalidExpression(expr) => write!(f, "invalid expression: {expr}"),
             Self::MissingElement(id) => write!(f, "missing element: {id}"),
             Self::UnsupportedAggregation(expr) => {
@@ -59,48 +65,62 @@ impl From<GraphError> for RuntimeError {
     }
 }
 
+impl From<DatalogError> for RuntimeError {
+    fn from(value: DatalogError) -> Self {
+        Self::Datalog(value)
+    }
+}
+
 impl Runtime {
-    pub fn from_graph(graph: Graph) -> Self {
-        Self { graph }
+    pub fn from_graph(graph: Graph) -> Result<Self, RuntimeError> {
+        let rulepacks = load_default_rulepacks()?;
+        Self::from_graph_with_rulepacks(graph, &rulepacks)
+    }
+
+    pub fn from_graph_with_rulepacks(
+        graph: Graph,
+        rulepacks: &[RulePack],
+    ) -> Result<Self, RuntimeError> {
+        let derived = materialize_core_indexes(&graph, rulepacks)?;
+        Ok(Self { graph, derived })
     }
 
     pub fn from_document(document: KirDocument) -> Result<Self, RuntimeError> {
-        Ok(Self {
-            graph: Graph::from_document(document)?,
-        })
+        Self::from_graph(Graph::from_document(document)?)
     }
 
     pub fn graph(&self) -> &Graph {
         &self.graph
     }
 
+    pub fn derived(&self) -> &DerivedIndexes {
+        &self.derived
+    }
+
     pub fn get_subtypes(&self, type_id: &str) -> Result<QueryResult<Vec<String>>, RuntimeError> {
-        let root = self
-            .graph
-            .node_id(type_id)
-            .ok_or_else(|| RuntimeError::MissingElement(type_id.to_string()))?;
-
-        let mut seen = HashSet::new();
-        let mut queue = VecDeque::from([root]);
-        let mut subtypes = Vec::new();
-        let mut explanation = vec![format!("start at {type_id}")];
-
-        while let Some(current) = queue.pop_front() {
-            for edge in self.graph.incoming(current, "specializes") {
-                if seen.insert(edge.source) {
-                    let child = self
-                        .graph
-                        .element_id(edge.source)
-                        .ok_or_else(|| RuntimeError::MissingElement(edge.source.to_string()))?;
-                    explanation.push(format!(
-                        "{child} specializes {}",
-                        self.graph.element_id(current).unwrap_or(type_id)
-                    ));
-                    subtypes.push(child.to_string());
-                    queue.push_back(edge.source);
-                }
-            }
+        if self.graph.node_id(type_id).is_none() {
+            return Err(RuntimeError::MissingElement(type_id.to_string()));
         }
+
+        let subtypes = self
+            .derived
+            .subtypes
+            .iter()
+            .filter_map(|(subtype, supertype)| (supertype == type_id).then(|| subtype.to_string()))
+            .collect::<Vec<_>>();
+        let explanation = subtypes
+            .iter()
+            .map(|subtype| {
+                if let Some(explanation) = self
+                    .derived
+                    .explanation_for("subtype", &[subtype.as_str(), type_id])
+                {
+                    format!("{subtype} derived by {}", explanation.rule_id)
+                } else {
+                    format!("{subtype} is a subtype of {type_id}")
+                }
+            })
+            .collect();
 
         Ok(QueryResult {
             value: subtypes,
@@ -109,38 +129,29 @@ impl Runtime {
     }
 
     pub fn get_features(&self, type_id: &str) -> Result<QueryResult<Vec<String>>, RuntimeError> {
-        let root = self
-            .graph
-            .node_id(type_id)
-            .ok_or_else(|| RuntimeError::MissingElement(type_id.to_string()))?;
-
-        let mut seen_types = HashSet::new();
-        let mut queue = VecDeque::from([root]);
-        let mut features = Vec::new();
-        let mut seen_features = HashSet::new();
-        let mut explanation = Vec::new();
-
-        while let Some(current) = queue.pop_front() {
-            if !seen_types.insert(current) {
-                continue;
-            }
-
-            let current_name = self.graph.element_id(current).unwrap_or(type_id);
-            for edge in self.graph.outgoing(current, "features") {
-                let feature = self
-                    .graph
-                    .element_id(edge.target)
-                    .ok_or_else(|| RuntimeError::MissingElement(edge.target.to_string()))?;
-                if seen_features.insert(feature.to_string()) {
-                    features.push(feature.to_string());
-                    explanation.push(format!("{current_name} contributes feature {feature}"));
-                }
-            }
-
-            for edge in self.graph.outgoing(current, "specializes") {
-                queue.push_back(edge.target);
-            }
+        if self.graph.node_id(type_id).is_none() {
+            return Err(RuntimeError::MissingElement(type_id.to_string()));
         }
+
+        let features = self
+            .derived
+            .inherited_features
+            .iter()
+            .filter_map(|(owner, feature)| (owner == type_id).then(|| feature.to_string()))
+            .collect::<Vec<_>>();
+        let explanation = features
+            .iter()
+            .map(|feature| {
+                if let Some(explanation) = self
+                    .derived
+                    .explanation_for("inherited_feature", &[type_id, feature.as_str()])
+                {
+                    format!("{feature} derived by {}", explanation.rule_id)
+                } else {
+                    format!("{type_id} owns feature {feature}")
+                }
+            })
+            .collect();
 
         Ok(QueryResult {
             value: features,

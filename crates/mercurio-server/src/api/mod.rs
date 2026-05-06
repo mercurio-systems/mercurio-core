@@ -3,16 +3,18 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::{Deref, DerefMut};
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::sync::{
     Arc, Mutex, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{Request, StatusCode, Uri, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -354,6 +356,40 @@ pub struct EditorSemanticCompileResponseDto {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SnippetParseResponseDto {
+    pub ok: bool,
+    pub path: String,
+    pub diagnostics: Vec<EditorDiagnosticDto>,
+    pub symbols: Vec<SnippetSymbolDto>,
+    pub outline: Vec<EditorOutlineNodeDto>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SnippetEvaluateResponseDto {
+    pub ok: bool,
+    pub path: String,
+    pub diagnostics: Vec<EditorDiagnosticDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<String>,
+    pub explanation: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SnippetSymbolDto {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub start_line_number: usize,
+    pub start_column: usize,
+    pub end_line_number: usize,
+    pub end_column: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct EditorLintResponseDto {
     pub path: String,
     pub ok: bool,
@@ -478,6 +514,7 @@ pub(crate) struct CompiledWorkspaceFile {
 pub struct ServerState {
     default_workspace: WorkspaceService,
     workspaces: HashMap<String, Arc<RwLock<WorkspaceService>>>,
+    mockup_session_roots: HashMap<String, PathBuf>,
     next_workspace_number: u64,
 }
 
@@ -486,6 +523,7 @@ impl ServerState {
         Self {
             default_workspace,
             workspaces: HashMap::new(),
+            mockup_session_roots: HashMap::new(),
             next_workspace_number: 1,
         }
     }
@@ -541,8 +579,38 @@ impl ServerState {
     fn delete_workspace(&mut self, workspace_id: &str) -> Result<(), ApiError> {
         self.workspaces
             .remove(workspace_id)
-            .map(|_| ())
+            .map(|_| {
+                if let Some(root) = self.mockup_session_roots.remove(workspace_id) {
+                    let _ = std::fs::remove_dir_all(root);
+                }
+            })
             .ok_or_else(|| ApiError::MissingWorkspace(workspace_id.to_string()))
+    }
+
+    fn create_mockup_session_workspace(&mut self) -> Result<WorkspaceOpenResponse, ApiError> {
+        if std::env::var_os("MERCURIO_MOCKUP_MODE").is_none() {
+            return Err(ApiError::MissingWorkspace("mockup mode is not enabled".to_string()));
+        }
+
+        let workspace_id = self.next_workspace_id();
+        let session_root = self
+            .default_workspace
+            .workspace_root()
+            .join(".mockup-sessions")
+            .join(&workspace_id);
+        copy_mockup_workspace(self.default_workspace.workspace_root(), &session_root)?;
+        let workspace = WorkspaceService::from_workspace_root(&session_root)?;
+        let status = workspace_status_for(&workspace);
+        self.workspaces
+            .insert(workspace_id.clone(), Arc::new(RwLock::new(workspace)));
+        self.mockup_session_roots
+            .insert(workspace_id.clone(), session_root);
+        Ok(WorkspaceOpenResponse {
+            workspace_id,
+            workspace_root: status.workspace_root,
+            active_path: status.active_path,
+            project: status.project,
+        })
     }
 
     fn next_workspace_id(&mut self) -> String {
@@ -617,6 +685,7 @@ pub enum ApiError {
     MissingElement(String),
     MissingEditorFile(String),
     MissingWorkspace(String),
+    InvalidRequest(String),
     InvalidPath(String),
     AlreadyExists(String),
 }
@@ -627,6 +696,7 @@ impl std::fmt::Display for ApiError {
             Self::MissingElement(id) => write!(f, "element not found: {id}"),
             Self::MissingEditorFile(path) => write!(f, "editor file not found: {path}"),
             Self::MissingWorkspace(id) => write!(f, "workspace not found: {id}"),
+            Self::InvalidRequest(message) => write!(f, "{message}"),
             Self::InvalidPath(path) => write!(f, "invalid editor path: {path}"),
             Self::AlreadyExists(path) => write!(f, "editor file already exists: {path}"),
             Self::Diagnostic(err) => write!(f, "{err}"),
@@ -792,7 +862,18 @@ impl AppState {
         &self,
         request: &EvaluateExpressionRequestDto,
     ) -> EvaluateExpressionResponseDto {
-        let runtime = Runtime::from_graph(self.graph.clone());
+        let runtime = match Runtime::from_graph(self.graph.clone()) {
+            Ok(runtime) => runtime,
+            Err(err) => {
+                return EvaluateExpressionResponseDto {
+                    ok: false,
+                    value: None,
+                    value_type: None,
+                    explanation: Vec::new(),
+                    error: Some(err.to_string()),
+                };
+            }
+        };
         let mut context = ExecutionContext::default();
         for (owner_id, values) in &request.context_values {
             for (feature, value) in values {
@@ -939,6 +1020,57 @@ fn is_sysml_source_path(path: &str) -> bool {
     Path::new(path).extension().and_then(|value| value.to_str()) == Some("sysml")
 }
 
+const SYSML_SNIPPET_MAX_BYTES: usize = 64 * 1024;
+
+fn sanitize_sysml_snippet_path(path: Option<&str>) -> Result<String, ApiError> {
+    let raw_name = path
+        .and_then(|value| Path::new(value).file_name().and_then(|name| name.to_str()))
+        .unwrap_or("snippet.sysml")
+        .trim();
+    if raw_name.is_empty() {
+        return Err(ApiError::InvalidPath("empty snippet path".to_string()));
+    }
+
+    let mut sanitized = raw_name
+        .chars()
+        .map(|value| {
+            if value.is_ascii_alphanumeric() || matches!(value, '.' | '_' | '-') {
+                value
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if !sanitized.ends_with(".sysml") {
+        sanitized.push_str(".sysml");
+    }
+    if sanitized == ".sysml" || sanitized.len() > 96 {
+        return Err(ApiError::InvalidPath(raw_name.to_string()));
+    }
+    Ok(sanitized)
+}
+
+fn snippet_symbols_from_outline(outline: &[EditorOutlineNodeDto]) -> Vec<SnippetSymbolDto> {
+    let mut symbols = Vec::new();
+    collect_snippet_symbols(outline, &mut symbols);
+    symbols
+}
+
+fn collect_snippet_symbols(nodes: &[EditorOutlineNodeDto], symbols: &mut Vec<SnippetSymbolDto>) {
+    for node in nodes {
+        symbols.push(SnippetSymbolDto {
+            id: node.id.clone(),
+            label: node.label.clone(),
+            kind: node.kind.clone(),
+            start_line_number: node.start_line_number,
+            start_column: node.start_column,
+            end_line_number: node.end_line_number,
+            end_column: node.end_column,
+        });
+        collect_snippet_symbols(&node.children, symbols);
+    }
+}
+
 pub fn load_app_state(model_path: &Path) -> Result<AppState, ApiError> {
     Ok(load_server_state(model_path)?.app_state().clone())
 }
@@ -1009,6 +1141,22 @@ struct UpdateEditorFileRequest {
 struct EditorParseRequest {
     path: String,
     content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SnippetParseRequest {
+    path: Option<String>,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SnippetEvaluateRequest {
+    path: Option<String>,
+    content: String,
+    feature_id: String,
+    owner_id: String,
+    #[serde(default)]
+    context_values: BTreeMap<String, BTreeMap<String, Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2073,6 +2221,7 @@ impl IntoResponse for HttpApiError {
             ApiError::MissingWorkspace(id) => {
                 (StatusCode::NOT_FOUND, format!("workspace not found: {id}"))
             }
+            ApiError::InvalidRequest(message) => (StatusCode::BAD_REQUEST, message),
             ApiError::InvalidPath(path) => (
                 StatusCode::BAD_REQUEST,
                 format!("invalid editor path: {path}"),
@@ -2202,6 +2351,11 @@ pub fn build_router(state: impl Into<ServerState>) -> Router {
             get(get_default_workspace_path),
         )
         .route("/api/workspace/open", post(open_workspace))
+        .route("/api/mockup/session", post(create_mockup_session))
+        .route(
+            "/api/mockup/session/{workspace_id}/close",
+            post(close_mockup_session),
+        )
         .route(
             "/api/workspaces",
             get(list_workspaces).post(open_scoped_workspace),
@@ -2211,12 +2365,32 @@ pub fn build_router(state: impl Into<ServerState>) -> Router {
             get(get_scoped_workspace).delete(delete_scoped_workspace),
         )
         .route(
+            "/api/workspaces/{workspace_id}/workspace/status",
+            get(get_scoped_workspace_status),
+        )
+        .route(
             "/api/workspaces/{workspace_id}/model",
             get(get_scoped_model),
         )
         .route(
             "/api/workspaces/{workspace_id}/graph",
             get(get_scoped_graph),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/diagrams/render",
+            post(post_scoped_render_diagram),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/metatype-explorer",
+            get(get_scoped_metatype_explorer),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/l2-explorer",
+            get(get_scoped_l2_explorer),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/library/mounted-trees",
+            get(get_scoped_mounted_library_trees),
         )
         .route(
             "/api/workspaces/{workspace_id}/elements/{id}",
@@ -2233,6 +2407,18 @@ pub fn build_router(state: impl Into<ServerState>) -> Router {
         .route(
             "/api/workspaces/{workspace_id}/editor/file",
             get(get_scoped_editor_file).put(put_scoped_editor_file),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/outline",
+            get(get_scoped_editor_outline),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/semantic-outline",
+            get(get_scoped_editor_semantic_outline),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/editor/semantic-element",
+            get(get_scoped_editor_semantic_element),
         )
         .route(
             "/api/workspaces/{workspace_id}/editor/parse",
@@ -2253,6 +2439,10 @@ pub fn build_router(state: impl Into<ServerState>) -> Router {
         .route(
             "/api/workspaces/{workspace_id}/editor/refresh",
             post(refresh_scoped_editor_model),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/runtime/evaluate",
+            post(evaluate_scoped_expression),
         )
         .route(
             "/api/workspaces/{workspace_id}/semantic/workspace-session",
@@ -2300,6 +2490,11 @@ pub fn build_router(state: impl Into<ServerState>) -> Router {
         )
         .route("/api/editor/parse", post(parse_editor_content))
         .route("/api/editor/format", post(format_editor_content))
+        .route("/api/snippets/sysml/parse", post(parse_sysml_snippet))
+        .route(
+            "/api/snippets/sysml/evaluate",
+            post(evaluate_sysml_snippet),
+        )
         .route(
             "/api/editor/semantic-compile",
             post(compile_editor_semantic_content),
@@ -2440,7 +2635,239 @@ pub fn build_router(state: impl Into<ServerState>) -> Router {
             post(publish_package_version),
         )
         .route("/api/model-packages/publish", post(publish_model_package))
+        .route("/api/scripts/python/run", post(run_python_script))
+        .fallback(get(serve_static_asset))
         .with_state(Arc::new(RwLock::new(state)))
+        .layer(middleware::from_fn(mockup_route_filter))
+}
+
+async fn mockup_route_filter(request: Request<Body>, next: Next) -> Response {
+    if std::env::var_os("MERCURIO_MOCKUP_MODE").is_some()
+        && mockup_restricted_api_path(request.uri().path())
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    next.run(request).await
+}
+
+fn mockup_restricted_api_path(path: &str) -> bool {
+    [
+        "/api/ai",
+        "/api/artifacts",
+        "/api/editor/projects",
+        "/api/model-packages",
+        "/api/packages",
+        "/api/projects",
+        "/api/repositories",
+        "/api/session",
+        "/api/source-control",
+        "/api/v2",
+    ]
+    .iter()
+    .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
+}
+
+fn copy_mockup_workspace(source_root: &Path, session_root: &Path) -> Result<(), ApiError> {
+    if session_root.exists() {
+        std::fs::remove_dir_all(session_root)?;
+    }
+    std::fs::create_dir_all(session_root)?;
+    copy_mockup_workspace_entries(source_root, source_root, session_root)
+}
+
+fn copy_mockup_workspace_entries(
+    base_root: &Path,
+    current: &Path,
+    session_root: &Path,
+) -> Result<(), ApiError> {
+    for entry in std::fs::read_dir(current)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let relative_path = source_path.strip_prefix(base_root).map_err(|_| {
+            ApiError::InvalidPath(source_path.to_string_lossy().to_string())
+        })?;
+        if relative_path
+            .components()
+            .any(|component| component.as_os_str() == ".mockup-sessions")
+        {
+            continue;
+        }
+
+        let target_path = session_root.join(relative_path);
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            std::fs::create_dir_all(&target_path)?;
+            copy_mockup_workspace_entries(base_root, &source_path, session_root)?;
+        } else if file_type.is_file() {
+            if let Some(parent) = target_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(&source_path, &target_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PythonRunRequest {
+    script: String,
+    stdin: Option<String>,
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PythonRunResponse {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+    exit_code: Option<i32>,
+    timed_out: bool,
+}
+
+async fn run_python_script(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    Json(request): Json<PythonRunRequest>,
+) -> Result<Json<PythonRunResponse>, HttpApiError> {
+    let workspace_root = {
+        let state = read_server_state(&state);
+        state.workspace_root().to_path_buf()
+    };
+    let response = tokio::task::spawn_blocking(move || run_python_script_blocking(request, workspace_root))
+        .await
+        .map_err(|err| HttpApiError(ApiError::Ai(format!("Python worker failed: {err}"))))??;
+    Ok(Json(response))
+}
+
+fn run_python_script_blocking(
+    request: PythonRunRequest,
+    workspace_root: PathBuf,
+) -> Result<PythonRunResponse, HttpApiError> {
+    let timeout = Duration::from_millis(request.timeout_ms.unwrap_or(5_000).clamp(100, 30_000));
+    let python = std::env::var("MERCURIO_PYTHON_BIN").unwrap_or_else(|_| {
+        if cfg!(windows) {
+            "python".to_string()
+        } else {
+            "python3".to_string()
+        }
+    });
+    let script_dir = workspace_root.join(".mercurio").join("tmp");
+    std::fs::create_dir_all(&script_dir)
+        .map_err(|err| HttpApiError(ApiError::Io(err)))?;
+    let script_path = script_dir.join(format!(
+        "script-{}-{}.py",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    ));
+    std::fs::write(&script_path, request.script).map_err(|err| HttpApiError(ApiError::Io(err)))?;
+    let mut child = Command::new(python)
+        .arg("-I")
+        .arg(&script_path)
+        .current_dir(&workspace_root)
+        .env_clear()
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| HttpApiError(ApiError::Ai(format!("failed to start Python: {err}"))))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(request.stdin.unwrap_or_default().as_bytes())
+            .map_err(|err| HttpApiError(ApiError::Ai(format!("failed to write Python stdin: {err}"))))?;
+    }
+
+    let started = Instant::now();
+    let mut timed_out = false;
+    loop {
+        if let Some(_status) = child
+            .try_wait()
+            .map_err(|err| HttpApiError(ApiError::Ai(format!("failed to poll Python: {err}"))))?
+        {
+            break;
+        }
+        if started.elapsed() >= timeout {
+            timed_out = true;
+            let _ = child.kill();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|err| HttpApiError(ApiError::Ai(format!("failed to collect Python output: {err}"))))?;
+    let _ = std::fs::remove_file(&script_path);
+    let stdout = capped_utf8(output.stdout, 64 * 1024);
+    let stderr = capped_utf8(output.stderr, 64 * 1024);
+    let exit_code = output.status.code();
+    Ok(PythonRunResponse {
+        ok: !timed_out && output.status.success(),
+        stdout,
+        stderr,
+        exit_code,
+        timed_out,
+    })
+}
+
+fn capped_utf8(bytes: Vec<u8>, max_len: usize) -> String {
+    let truncated = bytes.len() > max_len;
+    let slice = if truncated { &bytes[..max_len] } else { &bytes };
+    let mut text = String::from_utf8_lossy(slice).to_string();
+    if truncated {
+        text.push_str("\n[output truncated]\n");
+    }
+    text
+}
+
+async fn serve_static_asset(uri: Uri) -> Response {
+    let Some(static_dir) = std::env::var_os("MERCURIO_STATIC_DIR").map(PathBuf::from) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let request_path = uri.path().trim_start_matches('/');
+    let relative_path = if request_path.is_empty() {
+        PathBuf::from("index.html")
+    } else {
+        PathBuf::from(request_path)
+    };
+    if relative_path.components().any(|component| matches!(component, Component::ParentDir)) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let mut path = static_dir.join(&relative_path);
+    if path.is_dir() {
+        path = path.join("index.html");
+    }
+    if !path.exists() {
+        path = static_dir.join("index.html");
+    }
+    match std::fs::read(&path) {
+        Ok(bytes) => (
+            [(header::CONTENT_TYPE, content_type_for_path(&path))],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+fn content_type_for_path(path: &Path) -> &'static str {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("json") => "application/json; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        Some("html") => "text/html; charset=utf-8",
+        _ => "application/octet-stream",
+    }
 }
 
 async fn get_health() -> Json<HealthStatus> {
@@ -4095,6 +4522,22 @@ async fn open_scoped_workspace(
     )?))
 }
 
+async fn create_mockup_session(
+    State(state): State<Arc<RwLock<ServerState>>>,
+) -> Result<Json<WorkspaceOpenResponse>, HttpApiError> {
+    let mut state = write_server_state(&state);
+    Ok(Json(state.create_mockup_session_workspace()?))
+}
+
+async fn close_mockup_session(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> StatusCode {
+    let mut state = write_server_state(&state);
+    let _ = state.delete_workspace(&workspace_id);
+    StatusCode::NO_CONTENT
+}
+
 async fn get_scoped_workspace(
     State(state): State<Arc<RwLock<ServerState>>>,
     AxumPath(workspace_id): AxumPath<String>,
@@ -4108,6 +4551,15 @@ async fn get_scoped_workspace(
         active_path: status.active_path,
         project: status.project,
     }))
+}
+
+async fn get_scoped_workspace_status(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<Json<WorkspaceStatus>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace_status_for(&workspace)))
 }
 
 async fn delete_scoped_workspace(
@@ -4140,6 +4592,54 @@ async fn get_scoped_graph(
     )))
 }
 
+async fn post_scoped_render_diagram(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<DiagramRenderRequestDto>,
+) -> Result<Json<DiagramViewDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.render_diagram(request)?))
+}
+
+async fn get_scoped_metatype_explorer(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<MetatypeExplorerQuery>,
+) -> Result<Json<MetatypeExplorerGraphDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.metatype_explorer(&MetatypeExplorerRequestDto {
+        seed_id: query.seed_id,
+        expanded_parents: query.expanded_parents,
+        expanded_children: query.expanded_children,
+    })?))
+}
+
+async fn get_scoped_l2_explorer(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<L2ExplorerQuery>,
+) -> Result<Json<L2ExplorerGraphDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.l2_explorer(&L2ExplorerRequestDto {
+        seed_id: query.seed_id,
+        expanded_parents: query.expanded_parents,
+        expanded_children: query.expanded_children,
+        include_reference_edges: query.include_reference_edges.unwrap_or(true),
+    })?))
+}
+
+async fn get_scoped_mounted_library_trees(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+) -> Result<Json<Vec<MountedLibraryTreeDto>>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let mut workspace = write_workspace_state(&workspace);
+    Ok(Json(workspace.load_mounted_library_trees()?))
+}
+
 async fn get_scoped_element(
     State(state): State<Arc<RwLock<ServerState>>>,
     AxumPath((workspace_id, id)): AxumPath<(String, String)>,
@@ -4159,6 +4659,16 @@ async fn search_scoped_elements(
     Ok(Json(
         workspace.search(query.q.as_deref().unwrap_or_default()),
     ))
+}
+
+async fn evaluate_scoped_expression(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<EvaluateExpressionRequestDto>,
+) -> Result<Json<EvaluateExpressionResponseDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.evaluate_expression(&request)))
 }
 
 async fn get_model(
@@ -4320,6 +4830,36 @@ async fn put_scoped_editor_file(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn get_scoped_editor_outline(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<EditorPathQuery>,
+) -> Result<Json<Vec<EditorOutlineNodeDto>>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.editor_outline(&query.path)?))
+}
+
+async fn get_scoped_editor_semantic_outline(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<EditorPathQuery>,
+) -> Result<Json<Vec<EditorOutlineNodeDto>>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.editor_semantic_outline(&query.path)?))
+}
+
+async fn get_scoped_editor_semantic_element(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Query(query): Query<SemanticElementQuery>,
+) -> Result<Json<ElementDetailsDto>, HttpApiError> {
+    let workspace = workspace_handle(&state, &workspace_id)?;
+    let workspace = read_workspace_state(&workspace);
+    Ok(Json(workspace.semantic_element(&query.path, &query.id)?))
+}
+
 async fn parse_scoped_editor_content(
     State(state): State<Arc<RwLock<ServerState>>>,
     AxumPath(workspace_id): AxumPath<String>,
@@ -4475,6 +5015,84 @@ async fn parse_editor_content(
     Ok(Json(
         state.parse_editor_content(&request.path, &request.content)?,
     ))
+}
+
+async fn parse_sysml_snippet(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    Json(request): Json<SnippetParseRequest>,
+) -> Result<Json<SnippetParseResponseDto>, HttpApiError> {
+    let path = sanitize_sysml_snippet_path(request.path.as_deref())?;
+    if request.content.len() > SYSML_SNIPPET_MAX_BYTES {
+        return Err(ApiError::InvalidRequest(format!(
+            "snippet content exceeds {} bytes",
+            SYSML_SNIPPET_MAX_BYTES
+        ))
+        .into());
+    }
+
+    let state = read_server_state(&state);
+    let compiled = state.compile_editor_semantic_content(&path, &request.content)?;
+    let symbols = snippet_symbols_from_outline(&compiled.semantic_outline);
+    Ok(Json(SnippetParseResponseDto {
+        ok: compiled.ok,
+        path,
+        diagnostics: compiled.diagnostics,
+        symbols,
+        outline: compiled.semantic_outline,
+    }))
+}
+
+async fn evaluate_sysml_snippet(
+    State(state): State<Arc<RwLock<ServerState>>>,
+    Json(request): Json<SnippetEvaluateRequest>,
+) -> Result<Json<SnippetEvaluateResponseDto>, HttpApiError> {
+    let path = sanitize_sysml_snippet_path(request.path.as_deref())?;
+    if request.content.len() > SYSML_SNIPPET_MAX_BYTES {
+        return Err(ApiError::InvalidRequest(format!(
+            "snippet content exceeds {} bytes",
+            SYSML_SNIPPET_MAX_BYTES
+        ))
+        .into());
+    }
+    if request.feature_id.trim().is_empty() || request.owner_id.trim().is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "feature_id and owner_id are required for snippet evaluation".to_string(),
+        )
+        .into());
+    }
+
+    let state = read_server_state(&state);
+    let compiled = state.compile_editor_semantic_file(&path, &request.content)?;
+    let diagnostics = compiled.diagnostics.clone();
+    if !compiled.semantic_ok() {
+        return Ok(Json(SnippetEvaluateResponseDto {
+            ok: false,
+            path,
+            diagnostics,
+            value: None,
+            value_type: None,
+            explanation: Vec::new(),
+            error: Some("Resolve semantic diagnostics before evaluating this expression.".to_string()),
+        }));
+    }
+
+    let evaluation = state.evaluate_compiled_expression(
+        &compiled,
+        &EvaluateExpressionRequestDto {
+            feature_id: request.feature_id,
+            owner_id: request.owner_id,
+            context_values: request.context_values,
+        },
+    );
+    Ok(Json(SnippetEvaluateResponseDto {
+        ok: evaluation.ok,
+        path,
+        diagnostics,
+        value: evaluation.value,
+        value_type: evaluation.value_type,
+        explanation: evaluation.explanation,
+        error: evaluation.error,
+    }))
 }
 
 async fn format_editor_content(
@@ -9387,7 +10005,7 @@ fn label_for_id(id: &str) -> String {
     tail.rsplit('.').next().unwrap_or(tail).to_string()
 }
 
-fn value_type_label(value: &Value) -> &'static str {
+pub(crate) fn value_type_label(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
         Value::Bool(_) => "boolean",
@@ -9406,6 +10024,13 @@ pub(crate) fn is_model_source_file(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|value| value.to_str()),
         Some("sysml" | "kerml")
+    )
+}
+
+pub(crate) fn is_editor_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|value| value.to_str()),
+        Some("sysml" | "kerml" | "py")
     )
 }
 
@@ -9429,7 +10054,7 @@ pub(crate) fn collect_editor_files(
             continue;
         }
 
-        if is_model_source_file(&path) {
+        if is_editor_file(&path) {
             let relative = path
                 .strip_prefix(root)
                 .expect("workspace file should remain under root");
@@ -9486,7 +10111,7 @@ pub(crate) fn resolve_workspace_file(
         }
     }
 
-    if !is_model_source_file(candidate) {
+    if !is_editor_file(candidate) {
         return Err(ApiError::InvalidPath(relative_path.to_string()));
     }
 
@@ -9634,8 +10259,9 @@ mod tests {
 
     use super::{
         EditorOutlineKey, ElementDetailsDto, ElementPropertyTableDto, GraphScope, StoredAiSettings,
-        build_editor_outline_index, build_router, build_semantic_editor_outline, load_server_state,
-        read_current_ai_usage, reserve_ai_tokens, rewrite_url_base, write_stored_ai_settings,
+        SYSML_SNIPPET_MAX_BYTES, build_editor_outline_index, build_router,
+        build_semantic_editor_outline, load_server_state, read_current_ai_usage, reserve_ai_tokens,
+        rewrite_url_base, write_stored_ai_settings,
     };
     use mercurio_core::repo_path;
 
@@ -12730,5 +13356,95 @@ mod tests {
                 .unwrap()
                 >= 1
         );
+    }
+
+    #[tokio::test]
+    async fn sysml_snippet_parse_endpoint_returns_symbols() {
+        let app = build_router(sample_state());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/snippets/sysml/parse")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "path": "../battery pack.sysml",
+                            "content": "package Demo {\n  part def BatteryPack;\n  part vehicleBattery: BatteryPack;\n}\n"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["path"], "battery_pack.sysml");
+        assert_eq!(json["ok"], true);
+        assert!(
+            json["symbols"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|symbol| symbol["label"] == "BatteryPack")
+        );
+    }
+
+    #[tokio::test]
+    async fn sysml_snippet_evaluate_endpoint_evaluates_expression() {
+        let app = build_router(sample_state());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/snippets/sysml/evaluate")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "path": "expression.sysml",
+                            "content": "package SnippetEvalDemo {\n  part def Vehicle {\n    derived attribute totalMass = 4.0 + 4.0;\n  }\n}\n",
+                            "feature_id": "feature.SnippetEvalDemo.Vehicle.totalMass",
+                            "owner_id": "type.SnippetEvalDemo.Vehicle"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["value"], 8.0);
+        assert_eq!(json["value_type"], "number");
+    }
+
+    #[tokio::test]
+    async fn sysml_snippet_parse_endpoint_rejects_large_payloads() {
+        let app = build_router(sample_state());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/snippets/sysml/parse")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "path": "large.sysml",
+                            "content": "x".repeat(SYSML_SNIPPET_MAX_BYTES + 1)
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

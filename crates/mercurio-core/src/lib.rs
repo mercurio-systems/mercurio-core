@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod authoring;
+pub mod datalog;
 pub mod derived;
 pub mod diagrams;
 pub mod frontend;
@@ -38,6 +39,11 @@ pub use authoring::{
     WriteBackMode, WriteBackResult, create_empty_model, load_authoring_project_from_kir,
     load_authoring_project_from_sysml,
 };
+pub use datalog::{
+    Atom, CORE_RULEPACK_ID, CORE_RULEPACK_VERSION, DatalogError, DerivedIndexes, Evaluation,
+    Explanation, Fact, Rule, RulePack, Term, evaluate, extract_graph_facts, load_default_rulepacks,
+    materialize_core_indexes,
+};
 pub use derived::{DerivedPropertySource, DerivedPropertyValue, derived_properties};
 pub use diagrams::{
     DiagramAttributeDto, DiagramDirectionDto, DiagramEdgeDto, DiagramKindDto,
@@ -72,7 +78,9 @@ pub use metamodel::{
     effective_properties, effective_properties_with_derived, element_metatype,
     query_element_attributes,
 };
-pub use paths::{default_stdlib_path, default_workspace_root, repo_path, repo_root};
+pub use paths::{
+    default_stdlib_path, default_stdlib_rulepack_path, default_workspace_root, repo_path, repo_root,
+};
 pub use project::{
     PROJECT_DESCRIPTOR_FILE_NAME, ProjectDescriptor, ProjectDescriptorError, ProjectLibraryRole,
     ResolvedProjectContext, ResolvedProjectLibrary, discover_project_descriptor_path,

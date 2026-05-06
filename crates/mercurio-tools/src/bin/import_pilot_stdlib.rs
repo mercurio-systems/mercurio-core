@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use mercurio_core::{
-    PilotExportDocument, default_stdlib_path, load_pilot_export, normalize_pilot_export, repo_path,
-    repo_root,
+    Graph, PilotExportDocument, RulePack, default_stdlib_path, load_pilot_export,
+    normalize_pilot_export, repo_path, repo_root,
 };
 use serde_json::{Value, json};
 use time::OffsetDateTime;
@@ -22,24 +22,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let export = load_pilot_export(&input_path)?;
     let mut kir = normalize_pilot_export(export.clone())?;
     kir.metadata = build_kir_metadata(&args, &input_path, &export)?;
+    let rulepack = RulePack::metamodel_adapter_from_graph(&Graph::from_document(kir.clone())?);
     kir.write_pretty_to_path(&args.output_path)?;
+    write_rulepack(&rulepack, &args.rulepack_output_path)?;
 
     println!("Imported pilot stdlib export:");
     println!("  input: {}", input_path.display());
     println!("  output: {}", args.output_path.display());
+    println!("  rulepack: {}", args.rulepack_output_path.display());
     println!("  elements: {}", kir.elements.len());
+    println!("  adapter facts: {}", rulepack.facts.len());
     Ok(())
 }
 
 struct Args {
     input_path: PathBuf,
     output_path: PathBuf,
+    rulepack_output_path: PathBuf,
     pilot_root: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let mut input_path = repo_path("fixtures/pilot_stdlib_export.json");
     let mut output_path = default_stdlib_path();
+    let mut rulepack_output_path = default_rulepack_path(&output_path);
     let mut pilot_root = None;
     let args = env::args().skip(1).collect::<Vec<_>>();
     let mut index = 0;
@@ -55,6 +61,12 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
                 index += 1;
                 let value = args.get(index).ok_or("missing value for --out")?;
                 output_path = PathBuf::from(value);
+                rulepack_output_path = default_rulepack_path(&output_path);
+            }
+            "--rulepack-out" => {
+                index += 1;
+                let value = args.get(index).ok_or("missing value for --rulepack-out")?;
+                rulepack_output_path = PathBuf::from(value);
             }
             "--pilot-root" => {
                 index += 1;
@@ -75,14 +87,39 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     Ok(Args {
         input_path,
         output_path,
+        rulepack_output_path,
         pilot_root,
     })
 }
 
 fn print_usage() {
     println!(
-        "Usage: cargo run -p mercurio-tools --bin import_pilot_stdlib -- [--pilot-root PATH] [--from-export PATH] [--out PATH]"
+        "Usage: cargo run -p mercurio-tools --bin import_pilot_stdlib -- [--pilot-root PATH] [--from-export PATH] [--out PATH] [--rulepack-out PATH]"
     );
+}
+
+fn default_rulepack_path(output_path: &Path) -> PathBuf {
+    let file_name = output_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("stdlib.kir.json");
+    let rulepack_name = if let Some(prefix) = file_name.strip_suffix(".kir.json") {
+        format!("{prefix}.rulepack.json")
+    } else {
+        format!("{file_name}.rulepack.json")
+    };
+    output_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(rulepack_name)
+}
+
+fn write_rulepack(
+    rulepack: &RulePack,
+    output_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    rulepack.write_pretty_to_path(output_path)?;
+    Ok(())
 }
 
 fn build_kir_metadata(

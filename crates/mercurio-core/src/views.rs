@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::datalog::materialize_core_indexes;
 use crate::graph::{Element, Graph};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -40,10 +41,16 @@ pub struct RequirementSourceDto {
 }
 
 pub fn requirements_table_view(graph: &Graph) -> RequirementTableViewDto {
+    let derived = materialize_core_indexes(graph, &[]).ok();
     let mut rows = graph
         .elements()
         .iter()
-        .filter(|element| is_requirement(element))
+        .filter(|element| {
+            derived
+                .as_ref()
+                .is_some_and(|derived| derived.requirements.contains(&element.element_id))
+                || is_requirement(element)
+        })
         .map(|requirement| RequirementTableRowDto {
             id: requirement.element_id.clone(),
             name: string_property(requirement, "declared_name")
@@ -51,8 +58,10 @@ pub fn requirements_table_view(graph: &Graph) -> RequirementTableViewDto {
             text: string_property(requirement, "text")
                 .or_else(|| string_property(requirement, "documentation")),
             owner: string_property(requirement, "owner"),
-            satisfied_by: related_sources(graph, requirement, &["satisfy", "satisfies"]),
-            verified_by: related_sources(graph, requirement, &["verify", "verifies"]),
+            satisfied_by: derived_sources(&derived, &requirement.element_id, "satisfies")
+                .unwrap_or_else(|| related_sources(graph, requirement, &["satisfy", "satisfies"])),
+            verified_by: derived_sources(&derived, &requirement.element_id, "verifies")
+                .unwrap_or_else(|| related_sources(graph, requirement, &["verify", "verifies"])),
             source: source_for(requirement),
         })
         .collect::<Vec<_>>();
@@ -78,6 +87,20 @@ pub fn requirements_table_view(graph: &Graph) -> RequirementTableViewDto {
         rows,
         warnings,
     }
+}
+
+fn derived_sources(
+    derived: &Option<crate::datalog::DerivedIndexes>,
+    requirement_id: &str,
+    relation: &str,
+) -> Option<Vec<String>> {
+    let derived = derived.as_ref()?;
+    let sources = match relation {
+        "satisfies" => derived.satisfied_by.get(requirement_id),
+        "verifies" => derived.verified_by.get(requirement_id),
+        _ => None,
+    }?;
+    Some(sources.iter().cloned().collect())
 }
 
 fn column(key: &str, label: &str) -> RequirementTableColumnDto {

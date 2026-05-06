@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const DEFAULT_STDLIB_RELATIVE_PATH: &str = "resources/stdlib.full.kir.json";
+const DEFAULT_STDLIB_RULEPACK_RELATIVE_PATH: &str = "resources/stdlib.rulepack.json";
 const REPO_SENTINELS: [&str; 3] = [
     "resources/stdlib.full.kir.json",
     "mappings/l2/pilot_constructs.seed.json",
@@ -14,6 +15,14 @@ pub fn default_stdlib_path() -> PathBuf {
     }
 
     repo_path(DEFAULT_STDLIB_RELATIVE_PATH)
+}
+
+pub fn default_stdlib_rulepack_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MERCURIO_STDLIB_RULEPACK_PATH") {
+        return PathBuf::from(path);
+    }
+
+    repo_path(DEFAULT_STDLIB_RULEPACK_RELATIVE_PATH)
 }
 
 pub fn repo_path(relative: &str) -> PathBuf {
@@ -77,4 +86,18 @@ fn looks_like_repo_root(path: &Path) -> bool {
     REPO_SENTINELS
         .iter()
         .all(|relative| path.join(relative).exists())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn default_stdlib_rulepack_path_points_to_resource() {
+        let path = super::default_stdlib_rulepack_path();
+
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("stdlib.rulepack.json")
+        );
+        assert!(path.exists());
+    }
 }

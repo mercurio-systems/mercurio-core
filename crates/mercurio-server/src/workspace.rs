@@ -18,6 +18,7 @@ use crate::api::{
     build_library_tree_from_document, collect_editor_files, is_model_source_file,
     lint_diagnostic_to_dto, normalize_relative_path, resolve_workspace_file,
     resolve_workspace_scope, source_language_for_path,
+    value_type_label,
 };
 use mercurio_core::diagrams::{DiagramRenderRequestDto, DiagramViewDto};
 use mercurio_core::frontend::ast::{Declaration, PackageDecl, SysmlModule};
@@ -25,8 +26,9 @@ use mercurio_core::frontend::format::format_path_text;
 use mercurio_core::frontend::lint::lint_text;
 use mercurio_core::ir::{KirDocument, load_model_stack};
 use mercurio_core::logging::{log_runtime_event, log_timed_event};
+use mercurio_core::paths::default_stdlib_rulepack_path;
 use mercurio_core::project::{ResolvedProjectContext, resolve_project_context};
-use mercurio_core::runtime::Runtime;
+use mercurio_core::runtime::{ExecutionContext, Runtime};
 use mercurio_core::source_set::{
     SourceCompileContext, SourceDocument, collect_context_modules, parse_source_module,
 };
@@ -91,6 +93,7 @@ struct SemanticCompileCacheKey {
     path: String,
     content_hash: u64,
     dependency_hash: u64,
+    rulepack_hash: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -233,6 +236,7 @@ impl WorkspaceService {
         ));
         let mut discovered_files = Vec::new();
         collect_editor_files(&self.workspace_root, scope_root, &mut discovered_files)?;
+        discovered_files.retain(|file| is_model_source_file(Path::new(&file.path)));
         discovered_files.sort_by(|left, right| left.path.cmp(&right.path));
         let discovered_count = discovered_files.len();
 
@@ -259,6 +263,9 @@ impl WorkspaceService {
         }
 
         for (relative_path, content) in overrides {
+            if !is_model_source_file(Path::new(relative_path)) {
+                continue;
+            }
             if seen_paths.contains(relative_path) {
                 continue;
             }
@@ -945,6 +952,7 @@ impl WorkspaceService {
 
         let files = files
             .into_iter()
+            .filter(|file| is_model_source_file(Path::new(&file.path)))
             .map(|file| self.semantic_workspace_file(&file.path))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -1003,7 +1011,7 @@ impl WorkspaceService {
             path.strip_prefix(&self.workspace_root)
                 .expect("editor path should remain under root"),
         );
-        if self.has_compiled_project() {
+        if is_model_source_file(&path) && self.has_compiled_project() {
             self.clear_source_cache();
             self.rebuild_compiled_project()?;
         }
@@ -1024,7 +1032,7 @@ impl WorkspaceService {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&path, content)?;
-        if self.has_compiled_project() {
+        if is_model_source_file(&path) && self.has_compiled_project() {
             self.clear_source_cache();
             self.rebuild_compiled_project()?;
         }
@@ -1100,6 +1108,90 @@ impl WorkspaceService {
                 .map(|document| document.elements.len()),
             semantic_outline: compiled.semantic_outline(),
         })
+    }
+
+    pub(crate) fn compile_editor_semantic_file(
+        &self,
+        relative_path: &str,
+        content: &str,
+    ) -> Result<CompiledWorkspaceFile, ApiError> {
+        let path = resolve_workspace_file(&self.workspace_root, relative_path)?;
+        let source_name = normalize_relative_path(
+            path.strip_prefix(&self.workspace_root)
+                .expect("resolved editor path must be inside workspace"),
+        );
+        self.compile_workspace_file(&source_name, Some(content), &self.workspace_root)
+    }
+
+    pub(crate) fn evaluate_compiled_expression(
+        &self,
+        compiled: &CompiledWorkspaceFile,
+        request: &EvaluateExpressionRequestDto,
+    ) -> EvaluateExpressionResponseDto {
+        let document = match compiled.document.as_ref() {
+            Some(document) => document,
+            None => {
+                return EvaluateExpressionResponseDto {
+                    ok: false,
+                    value: None,
+                    value_type: None,
+                    explanation: Vec::new(),
+                    error: Some("snippet did not produce an evaluatable semantic document".to_string()),
+                };
+            }
+        };
+        let merged_document = match KirDocument::merge([
+            self.library_context_document.clone(),
+            document.clone(),
+        ]) {
+            Ok(document) => document,
+            Err(err) => {
+                return EvaluateExpressionResponseDto {
+                    ok: false,
+                    value: None,
+                    value_type: None,
+                    explanation: Vec::new(),
+                    error: Some(err.to_string()),
+                };
+            }
+        };
+        let runtime = match Runtime::from_document(merged_document) {
+            Ok(runtime) => runtime,
+            Err(err) => {
+                return EvaluateExpressionResponseDto {
+                    ok: false,
+                    value: None,
+                    value_type: None,
+                    explanation: Vec::new(),
+                    error: Some(err.to_string()),
+                };
+            }
+        };
+        let mut context = ExecutionContext::default();
+        for (owner_id, values) in &request.context_values {
+            for (feature, value) in values {
+                context
+                    .values
+                    .insert((owner_id.clone(), feature.clone()), value.clone());
+            }
+        }
+
+        match runtime.evaluate(&request.feature_id, &request.owner_id, &context) {
+            Ok(result) => EvaluateExpressionResponseDto {
+                ok: true,
+                value_type: Some(value_type_label(&result.value).to_string()),
+                value: Some(result.value),
+                explanation: result.explanation,
+                error: None,
+            },
+            Err(err) => EvaluateExpressionResponseDto {
+                ok: false,
+                value: None,
+                value_type: None,
+                explanation: Vec::new(),
+                error: Some(err.to_string()),
+            },
+        }
     }
 
     pub fn lint_editor_content(
@@ -1829,6 +1921,7 @@ fn semantic_compile_cache_key(
         path: file.path.clone(),
         content_hash: stable_hash(&file.content),
         dependency_hash,
+        rulepack_hash: default_rulepack_hash(),
     }
 }
 
@@ -1977,9 +2070,18 @@ fn stable_hash<T: Hash>(value: &T) -> u64 {
     hasher.finish()
 }
 
+fn default_rulepack_hash() -> u64 {
+    let path = default_stdlib_rulepack_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => stable_hash(&content),
+        Err(_) => stable_hash(&path.display().to_string()),
+    }
+}
+
 fn default_template_for_path(path: &Path) -> &'static str {
     match path.extension().and_then(|value| value.to_str()) {
         Some("kerml") => DEFAULT_KERML_TEMPLATE,
+        Some("py") => "from pathlib import Path\n\nprint('Workspace files:')\nfor path in sorted(Path('.').glob('**/*')):\n    if path.is_file() and '.mercurio' not in path.parts:\n        print(path)\n",
         _ => DEFAULT_SYSML_TEMPLATE,
     }
 }
