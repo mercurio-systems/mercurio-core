@@ -44,6 +44,8 @@ Supported options:
 - `-Configuration release|debug`: selects the built executable from `target\<configuration>`.
 - `-InstallRoot PATH`: overrides `%LOCALAPPDATA%\Mercurio`.
 - `-InstallPython`: installs the Python SDK into the active `py` environment.
+- `-PythonMode editable|wheel`: selects editable source install or wheel install.
+- `-PythonWheel PATH`: installs a specific Python SDK wheel.
 - `-Build`: builds the selected Rust binary before install.
 - `-DryRun`: prints the planned actions without mutating the machine.
 
@@ -53,8 +55,40 @@ The script should:
 2. Copy it to `%LOCALAPPDATA%\Mercurio\bin`.
 3. Add the bin directory to the user `PATH` if missing.
 4. Verify `mercurio.exe --help`.
-5. Optionally run `py -m pip install -e .\python`.
+5. Optionally install the Python SDK from source or wheel.
 6. Verify `import mercurio`.
+
+## Release Package
+
+Build a release package before formal installer packaging:
+
+```powershell
+.\tools\build-release-package.ps1 -Clean
+```
+
+This writes:
+
+```text
+dist\
+  mercurio-windows-x64\
+    bin\
+      mercurio.exe
+    wheels\
+      mercurio-0.1.0-py3-none-any.whl
+    manifest.json
+```
+
+Install from the release package:
+
+```powershell
+.\tools\install-mercurio.ps1 -InstallPython -PythonMode wheel
+```
+
+Development installs can still use editable mode:
+
+```powershell
+.\tools\install-mercurio.ps1 -Configuration debug -InstallPython -PythonMode editable
+```
 
 ## Python SDK Policy
 

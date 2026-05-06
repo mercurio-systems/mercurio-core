@@ -6,6 +6,11 @@ param(
 
     [switch]$InstallPython,
 
+    [ValidateSet("editable", "wheel")]
+    [string]$PythonMode = "editable",
+
+    [string]$PythonWheel,
+
     [switch]$Build,
 
     [switch]$DryRun
@@ -60,6 +65,7 @@ $binDir = Join-Path $InstallRoot "bin"
 $sourceExe = Join-Path $repoRoot "target\$Configuration\mercurio.exe"
 $targetExe = Join-Path $binDir "mercurio.exe"
 $pythonProject = Join-Path $repoRoot "python"
+$wheelInstallDir = Join-Path $InstallRoot "wheels"
 
 if ($Build) {
     Invoke-InstallCommand "Building Mercurio $Configuration binary" {
@@ -90,12 +96,43 @@ Invoke-InstallCommand "Verifying Mercurio executable" {
 }
 
 if ($InstallPython) {
-    if (-not (Test-Path $pythonProject)) {
-        throw "Python project not found: $pythonProject"
-    }
+    if ($PythonMode -eq "wheel") {
+        if ([string]::IsNullOrWhiteSpace($PythonWheel)) {
+            $packageWheelDir = Join-Path $repoRoot "dist\mercurio-windows-x64\wheels"
+            $wheels = @()
+            if (Test-Path $packageWheelDir) {
+                $wheels = Get-ChildItem -Path $packageWheelDir -Filter "mercurio-*.whl" | Sort-Object LastWriteTime -Descending
+            }
+            if ($wheels.Count -eq 0) {
+                throw "No Mercurio wheel found in $packageWheelDir. Pass -PythonWheel or run tools\build-release-package.ps1."
+            }
+            $PythonWheel = $wheels[0].FullName
+        }
 
-    Invoke-InstallCommand "Installing Mercurio Python SDK in editable mode" {
-        py -m pip install -e $pythonProject
+        if (-not (Test-Path $PythonWheel)) {
+            throw "Python wheel not found: $PythonWheel"
+        }
+
+        $targetWheel = Join-Path $wheelInstallDir (Split-Path -Leaf $PythonWheel)
+        Invoke-InstallCommand "Creating wheel directory $wheelInstallDir" {
+            New-Item -ItemType Directory -Force -Path $wheelInstallDir | Out-Null
+        }
+
+        Invoke-InstallCommand "Copying Python wheel to $targetWheel" {
+            Copy-Item -LiteralPath $PythonWheel -Destination $targetWheel -Force
+        }
+
+        Invoke-InstallCommand "Installing Mercurio Python SDK from wheel" {
+            py -m pip install --upgrade $targetWheel
+        }
+    } else {
+        if (-not (Test-Path $pythonProject)) {
+            throw "Python project not found: $pythonProject"
+        }
+
+        Invoke-InstallCommand "Installing Mercurio Python SDK in editable mode" {
+            py -m pip install -e $pythonProject
+        }
     }
 
     Invoke-InstallCommand "Verifying Mercurio Python SDK import" {

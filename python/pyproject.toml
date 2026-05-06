@@ -16,5 +16,5 @@ authors = [
 [project.optional-dependencies]
 test = []
 
-[tool.setuptools.packages.find]
-where = ["."]
+[tool.setuptools]
+packages = ["mercurio"]
