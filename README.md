@@ -16,13 +16,12 @@ The goal of this repository is to make the modeling kernel useful on its own: pa
 ## What Lives Here
 
 - `mercurio-core` parses, compiles, lints, loads libraries, builds runtime graphs, and computes derived values.
-- `mercurio-server` contains the product/server workspace service, shared application DTOs, and Axum router helpers.
 - `mercurio-cli` provides the public `mercurio` command for parse, compile, lint, and package workflows.
 - `mercurio-tools` contains maintainer tools for diagnostics, benchmarks, demos, and Pilot comparison/export workflows.
 - `resources/` contains bundled runtime and standard library artifacts.
 - `examples/` and `fixtures/` provide SysML, KerML, and KIR models for tests and demonstrations.
 
-The hosted product and UI live in the private `mercurio-product` repository. They depend on `mercurio-core` for domain behavior and can depend on `mercurio-server` for the server/workspace API surface.
+The hosted product, UI, and privileged console API live in the private `mercurio-product` repository. They depend on `mercurio-core` for domain behavior.
 
 ## Core Concepts
 
@@ -416,11 +415,9 @@ cargo run -p mercurio-tools --bin import_pilot_stdlib -- --pilot-root path/to/pi
 
 - `Cargo.toml` - workspace manifest
 - `crates/mercurio-core/` - library crate
-- `crates/mercurio-server/` - product/server API, workspace service, and application DTO crate
 - `crates/mercurio-cli/` - public command-line binaries
 - `crates/mercurio-tools/` - maintainer diagnostics, benchmarks, demos, and Pilot comparison tools
 - `crates/mercurio-core/src/frontend/` - SysML, KerML, linting, formatting, and resolver code
-- `crates/mercurio-server/src/api/` - shared application DTOs and router helpers consumed by private hosts
 - `examples/` - KIR JSON models and SysML/KerML example corpora
 - `resources/` - bundled runtime and library resources
 - `docs/` - deeper architecture and implementation notes

@@ -1,5 +1,10 @@
 # Server Implementation Plan
 
+Historical note: Mercurio Core is now library-only. The privileged HTTP/console API
+implementation lives in `mercurio-product/mercurio-console-api`. Keep reusable
+semantic and packaging logic in `mercurio-core`; keep deployment and HTTP route
+policy in the product repository.
+
 ## Goal
 
 Build Mercurio Server as a semantic reasoning service over external source authorities.
@@ -32,21 +37,18 @@ Do not make Mercurio Server the default source authority. Do not create per-user
 
 ## Proposed Module Shape
 
-The server binary now lives in this core repo alongside the reusable library code.
+The server binary lives in the product repository alongside the deployable console surface.
 
 Recommended shape:
 
 ```text
-src/
-  bin/
-    mercurio-server.rs
-  server/
-    mod.rs
-    config.rs
-    source_control.rs
-    routes/
-    services/
-    dto/
+mercurio-product/
+  mercurio-console-api/
+    src/
+      main.rs
+      lib.rs
+      api/
+      workspace.rs
 ```
 
 The existing server project/file API can remain as a prototype or compatibility slice while the project repository model is introduced, but new work should favor repository authority records and semantic artifacts.

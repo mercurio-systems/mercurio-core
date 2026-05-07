@@ -32,7 +32,6 @@ enum Command {
     Lint(LintCommand),
     Package(PackageCommand),
     Project(ProjectCommand),
-    Server(ServerCommand),
     Completions(CompletionsCommand),
 }
 
@@ -134,20 +133,6 @@ struct ProjectNewCommand {
     force: bool,
     #[arg(long)]
     quiet: bool,
-}
-
-#[derive(Debug, Args)]
-struct ServerCommand {
-    #[arg(long, default_value = "127.0.0.1")]
-    host: String,
-    #[arg(long, default_value_t = 0)]
-    port: u16,
-    #[arg(long)]
-    workspace: Option<PathBuf>,
-    #[arg(long)]
-    mockup: bool,
-    #[arg(long)]
-    static_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -274,52 +259,8 @@ fn run(cli: Cli) -> Result<RunResult, CliError> {
         Command::Lint(command) => run_lint(command),
         Command::Package(command) => run_package(command),
         Command::Project(command) => run_project(command),
-        Command::Server(command) => run_server(command),
         Command::Completions(command) => run_completions(command),
     }
-}
-
-fn run_server(command: ServerCommand) -> Result<RunResult, CliError> {
-    let workspace = command.workspace.unwrap_or_else(|| {
-        if command.mockup {
-            PathBuf::from("/data/workspace")
-        } else {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        }
-    });
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|err| CliError::execution(format!("failed to start async runtime: {err}")))?;
-    if command.mockup {
-        runtime
-            .block_on(mercurio_server::serve_mockup_http_with_startup(
-                &command.host,
-                command.port,
-                &workspace,
-                command.static_dir.as_deref(),
-                |startup| match serde_json::to_string(startup) {
-                    Ok(line) => println!("{line}"),
-                    Err(err) => eprintln!("mercurio: failed to serialize startup info: {err}"),
-                },
-            ))
-            .map_err(|err| CliError::execution(format!("server failed: {err}")))?;
-    } else {
-        runtime
-            .block_on(mercurio_server::serve_workspace_http_with_startup(
-                &command.host,
-                command.port,
-                &workspace,
-                |startup| match serde_json::to_string(startup) {
-                    Ok(line) => println!("{line}"),
-                    Err(err) => eprintln!("mercurio: failed to serialize startup info: {err}"),
-                },
-            ))
-            .map_err(|err| CliError::execution(format!("server failed: {err}")))?;
-    }
-
-    Ok(RunResult {
-        exit_code: 0,
-        stdout: String::new(),
-    })
 }
 
 fn run_parse(command: ParseCommand) -> Result<RunResult, CliError> {

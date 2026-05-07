@@ -9,10 +9,6 @@ name = "audit_pilot_corpus"
 path = "src/bin/audit_pilot_corpus.rs"
 
 [[bin]]
-name = "benchmark_examples"
-path = "src/bin/benchmark_examples.rs"
-
-[[bin]]
 name = "compare_kerml_examples"
 path = "src/bin/compare_kerml_examples.rs"
 
@@ -29,10 +25,6 @@ name = "compare_pilot_semantics"
 path = "src/bin/compare_pilot_semantics.rs"
 
 [[bin]]
-name = "diagnose_examples"
-path = "src/bin/diagnose_examples.rs"
-
-[[bin]]
 name = "import_pilot_stdlib"
 path = "src/bin/import_pilot_stdlib.rs"
 
@@ -46,7 +38,6 @@ path = "src/bin/runtime_demo.rs"
 
 [dependencies]
 mercurio-core = { path = "../mercurio-core" }
-mercurio-server = { path = "../mercurio-server" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 time.workspace = true

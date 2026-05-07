@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod assessment;
 pub mod authoring;
 pub mod datalog;
 pub mod derived;
@@ -31,6 +32,11 @@ pub use ai::{
     summarize_semantic_changes_with_secret_overrides,
     test_configured_reasoning_provider_connection, test_default_reasoning_provider_connection,
     test_default_reasoning_provider_connection_with_secret_overrides,
+};
+pub use assessment::{
+    AssessmentAssertion, AssessmentAssertionReport, AssessmentError, AssessmentExpectation,
+    AssessmentQuery, AssessmentReport, AssessmentSpec, AssessmentStatus, query_evaluation,
+    run_evaluation_assessment, run_graph_assessment, sysml_module_assessment_facts,
 };
 pub use authoring::{
     Alias, AttributeWritePolicy, AuthoringError, AuthoringModule, AuthoringProject,
