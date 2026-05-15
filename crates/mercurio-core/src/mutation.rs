@@ -110,6 +110,77 @@ pub enum SemanticMutation {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticMutationCapabilityContext {
+    pub metamodel_version: String,
+    pub supported_operations: Vec<String>,
+    pub definition_keywords: Vec<String>,
+    pub usage_keywords: Vec<String>,
+    pub relationship_kinds: Vec<String>,
+    pub guidance: Vec<String>,
+}
+
+pub fn default_semantic_mutation_capability_context() -> SemanticMutationCapabilityContext {
+    SemanticMutationCapabilityContext {
+        metamodel_version: "sysml-v2-writable-mutation-v1".to_string(),
+        supported_operations: vec![
+            "AddPackage".to_string(),
+            "AddDefinition".to_string(),
+            "AddUsage".to_string(),
+            "AddRelationship".to_string(),
+            "RenameDeclaration".to_string(),
+            "UpdateUsageType".to_string(),
+            "SetExpression".to_string(),
+            "UpdateSpecializations".to_string(),
+            "MoveDeclaration".to_string(),
+            "SetAttribute".to_string(),
+        ],
+        definition_keywords: vec![
+            "part".to_string(),
+            "attribute".to_string(),
+            "requirement".to_string(),
+            "item".to_string(),
+            "connection".to_string(),
+            "port".to_string(),
+            "action".to_string(),
+            "constraint".to_string(),
+            "calc".to_string(),
+            "state".to_string(),
+            "view".to_string(),
+            "verification".to_string(),
+        ],
+        usage_keywords: vec![
+            "part".to_string(),
+            "attribute".to_string(),
+            "requirement".to_string(),
+            "item".to_string(),
+            "connection".to_string(),
+            "port".to_string(),
+            "action".to_string(),
+            "constraint".to_string(),
+            "calc".to_string(),
+            "state".to_string(),
+            "satisfy".to_string(),
+            "verify".to_string(),
+            "ref".to_string(),
+            "reference".to_string(),
+        ],
+        relationship_kinds: vec![
+            "satisfy".to_string(),
+            "verify".to_string(),
+            "trace".to_string(),
+            "refine".to_string(),
+        ],
+        guidance: vec![
+            "Use SysML v2 textual concepts, not SysML v1 block terminology.".to_string(),
+            "Never use keyword `block`; use `part` for part definitions and part usages."
+                .to_string(),
+            "Return semantic mutations, not source text edits.".to_string(),
+            "Core feasibility remains authoritative for contextual legality.".to_string(),
+        ],
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SemanticExpression {
     Text(String),
@@ -303,4 +374,27 @@ pub(crate) fn merge_diff(target: &mut SemanticDiff, source: SemanticDiff) {
     target
         .removed_relationships
         .extend(source.removed_relationships);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_semantic_mutation_capability_context;
+
+    #[test]
+    fn default_capability_context_exposes_writable_sysml_v2_vocabulary() {
+        let context = default_semantic_mutation_capability_context();
+
+        assert_eq!(
+            context.metamodel_version,
+            "sysml-v2-writable-mutation-v1"
+        );
+        assert!(context.supported_operations.contains(&"AddDefinition".to_string()));
+        assert!(context.definition_keywords.contains(&"part".to_string()));
+        assert!(!context.definition_keywords.contains(&"block".to_string()));
+        assert!(context.relationship_kinds.contains(&"satisfy".to_string()));
+        assert!(context
+            .guidance
+            .iter()
+            .any(|item| item.contains("Never use keyword `block`")));
+    }
 }
