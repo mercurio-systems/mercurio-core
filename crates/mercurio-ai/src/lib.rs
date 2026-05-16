@@ -12,8 +12,8 @@ pub use mercurio_core::{
     SemanticReasoningContext, WorkspaceRevision, default_model_quality_profile,
     default_semantic_mutation_capability_context,
     enrich_semantic_reasoning_context_with_child_affordances, evaluate_semantic_goal,
-    explain_semantic_goal,
-    load_authoring_project_from_sysml, semantic_reasoning_context_from_authoring_project,
+    explain_semantic_goal, load_authoring_project_from_sysml,
+    semantic_reasoning_context_from_authoring_project,
 };
 
 const DEFAULT_OPENAI_MODEL: &str = "gpt-5.4-mini";
@@ -2708,6 +2708,7 @@ mod tests {
     use crate::{
         AskMercurioArtifact, AskMercurioTask, ElementRef, ReasoningProvider, ReasoningProviderKind,
         SemanticAgentRunRequest, SemanticAgentRunStatus, SemanticMutation, WorkspaceRevision,
+        explain_semantic_goal,
     };
 
     struct FixedProposalProvider {
@@ -2832,6 +2833,8 @@ package HybridVehicle {
         assert!(prompt.contains("sysml-v2-writable-mutation-v1"));
         assert!(prompt.contains("semantic_context"));
         assert!(prompt.contains("sysml-v2-authoring-context-v1"));
+        assert!(prompt.contains("quality_goal_guidance"));
+        assert!(prompt.contains("Every requirement element must have non-empty semantic field"));
         assert!(prompt.contains("Never use keyword `block`"));
         assert!(prompt.contains("HybridVehicle.HybridVehicle"));
     }

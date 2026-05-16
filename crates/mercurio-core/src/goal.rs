@@ -90,11 +90,7 @@ pub struct SemanticGoalExplanation {
 pub fn explain_semantic_goal(goal: &SemanticGoalSpec) -> SemanticGoalExplanation {
     SemanticGoalExplanation {
         policy: explain_goal_policy(goal.policy, goal.checks.len()),
-        instructions: goal
-            .checks
-            .iter()
-            .flat_map(explain_goal_check)
-            .collect(),
+        instructions: goal.checks.iter().flat_map(explain_goal_check).collect(),
     }
 }
 
@@ -722,6 +718,21 @@ mod tests {
         }));
         assert!(evaluation.results.iter().any(|result| {
             !result.satisfied && matches!(result.check, SemanticGoalCheck::TypedUsages { .. })
+        }));
+    }
+
+    #[test]
+    fn explains_default_quality_profile_for_ai_guidance() {
+        let explanation = explain_semantic_goal(&default_model_quality_profile().goal);
+
+        assert_eq!(explanation.policy, "All 2 checks must be satisfied.");
+        assert!(explanation.instructions.iter().any(|instruction| {
+            instruction.contains("Every requirement element must have non-empty semantic field")
+                && instruction.contains("id, text")
+                && instruction.contains("SetAttribute")
+        }));
+        assert!(explanation.instructions.iter().any(|instruction| {
+            instruction.contains("Every usage with kind(s) part must be explicitly typed")
         }));
     }
 

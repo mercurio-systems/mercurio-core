@@ -70,8 +70,7 @@ pub use frontend::sysml::{
 pub use goal::{
     GoalCheckEvaluation, GoalEvaluation, GoalPolicy, SemanticGoalCheck, SemanticGoalExplanation,
     SemanticGoalProfile, SemanticGoalProfileKind, SemanticGoalSpec, default_model_quality_profile,
-    evaluate_semantic_goal,
-    explain_semantic_goal,
+    evaluate_semantic_goal, explain_semantic_goal,
 };
 pub use graph::{Edge, Graph, GraphError, NodeId};
 pub use ir::{KirDocument, KirElement, KirError, load_model_stack};
