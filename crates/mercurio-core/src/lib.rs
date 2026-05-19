@@ -12,6 +12,7 @@ pub mod library;
 pub mod logging;
 pub mod metamodel;
 pub mod mutation;
+pub mod outline;
 pub mod paths;
 pub mod project;
 pub mod proposal;
@@ -95,6 +96,10 @@ pub use mutation::{
     enrich_semantic_reasoning_context_with_child_affordances,
     enrich_semantic_reasoning_context_with_graph,
     semantic_reasoning_context_from_authoring_project,
+};
+pub use outline::{
+    EditorOutlineKey, EditorOutlineNodeDto, build_editor_outline,
+    build_editor_outline_index_for_graph, build_semantic_editor_outline_from_document,
 };
 pub use paths::{
     default_stdlib_path, default_stdlib_rulepack_path, default_workspace_root, repo_path, repo_root,
