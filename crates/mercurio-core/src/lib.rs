@@ -1,5 +1,6 @@
 pub mod assessment;
 pub mod authoring;
+pub mod constraints;
 pub mod datalog;
 pub mod derived;
 pub mod diagrams;
@@ -35,6 +36,13 @@ pub use authoring::{
     QualifiedName, RenderedSpan, SemanticAttribute, SemanticEdit, Usage, ValidationReport,
     WriteBackMode, WriteBackResult, create_empty_model, load_authoring_project_from_kir,
     load_authoring_project_from_sysml,
+};
+pub use constraints::{
+    ConstraintDiagnosticDto, ConstraintExplanationDto, ConstraintGraphEdgeDto,
+    ConstraintGraphRequestDto, ConstraintGraphViewDto, ConstraintRecordDto,
+    ConstraintSolveRequestDto, ConstraintSolveResultDto, ConstraintStatusDto,
+    ConstraintVariableDto, ConstraintVariableStatusDto, RequirementCheckDto, RequirementStatusDto,
+    execution_context_from_nested_values, render_constraint_graph, solve_constraints,
 };
 pub use datalog::{
     Atom, CORE_RULEPACK_ID, CORE_RULEPACK_VERSION, DatalogError, DerivedIndexes, Evaluation,
@@ -135,7 +143,7 @@ pub use views::{
     L2ExplorerRequestDto, LibraryTreeNodeDto, MetatypeExplorerEdgeDto, MetatypeExplorerGraphDto,
     MetatypeExplorerNodeDto, MetatypeExplorerRequestDto, ModelMetadataDto, RequirementSourceDto,
     RequirementTableColumnDto, RequirementTableRowDto, RequirementTableViewDto, SearchResultDto,
-    document_model_metadata_view, element_details, graph_view, l2_explorer_view,
-    library_tree_view, library_tree_view_from_document, metatype_explorer_view,
-    model_metadata_view, requirements_table_view, search_view,
+    document_model_metadata_view, element_details, graph_view, l2_explorer_view, library_tree_view,
+    library_tree_view_from_document, metatype_explorer_view, model_metadata_view,
+    requirements_table_view, search_view,
 };

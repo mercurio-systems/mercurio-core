@@ -3074,10 +3074,11 @@ package HybridVehicle {
 
         assert_eq!(run.status, SemanticAgentRunStatus::Completed);
         assert_eq!(run.stop_reason, "goal and quality satisfied");
-        assert!(run
-            .final_files
-            .get("model.sysml")
-            .is_some_and(|source| source.contains("part def UAVInterceptor")));
+        assert!(
+            run.final_files
+                .get("model.sysml")
+                .is_some_and(|source| source.contains("part def UAVInterceptor"))
+        );
     }
 
     #[test]

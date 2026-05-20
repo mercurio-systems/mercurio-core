@@ -248,7 +248,8 @@ fn render_structure_diagram(
     warnings.extend(traversal.warnings);
 
     let node_start = Instant::now();
-    let mut nodes = traversal.visible_ids
+    let mut nodes = traversal
+        .visible_ids
         .iter()
         .filter_map(|node_id| graph.element(*node_id))
         .filter(|element| include_element(element, &spec.query))
@@ -315,7 +316,10 @@ fn render_structure_diagram(
         .map(|(phase, elapsed)| format!("{phase}={}ms", elapsed.as_millis()))
         .collect::<Vec<_>>();
     if !slow_phases.is_empty() {
-        warnings.push(format!("Diagram render timing: {}.", slow_phases.join(", ")));
+        warnings.push(format!(
+            "Diagram render timing: {}.",
+            slow_phases.join(", ")
+        ));
     }
 
     Ok(DiagramViewDto {
@@ -368,7 +372,10 @@ fn collect_structure_ids(
             DiagramDirectionDto::Parents | DiagramDirectionDto::Both
         ) {
             for relation in relations {
-                for edge in graph.outgoing(node_id, relation).take(MAX_RELATION_FANOUT_PER_NODE) {
+                for edge in graph
+                    .outgoing(node_id, relation)
+                    .take(MAX_RELATION_FANOUT_PER_NODE)
+                {
                     queue.push_back((edge.target, depth + 1));
                 }
                 if graph.outgoing(node_id, relation).count() > MAX_RELATION_FANOUT_PER_NODE {
@@ -384,7 +391,10 @@ fn collect_structure_ids(
             DiagramDirectionDto::Children | DiagramDirectionDto::Both
         ) {
             for relation in relations {
-                for edge in graph.incoming(node_id, relation).take(MAX_RELATION_FANOUT_PER_NODE) {
+                for edge in graph
+                    .incoming(node_id, relation)
+                    .take(MAX_RELATION_FANOUT_PER_NODE)
+                {
                     queue.push_back((edge.source, depth + 1));
                 }
                 if graph.incoming(node_id, relation).count() > MAX_RELATION_FANOUT_PER_NODE {
@@ -423,10 +433,7 @@ fn resolve_root<'a>(graph: &'a Graph, root: &str) -> Option<&'a Element> {
     })
 }
 
-fn include_element(
-    element: &Element,
-    query: &DiagramQueryOptionsDto,
-) -> bool {
+fn include_element(element: &Element, query: &DiagramQueryOptionsDto) -> bool {
     if element.layer < 2 {
         return query.include_libraries;
     }

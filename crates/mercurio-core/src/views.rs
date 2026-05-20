@@ -8,8 +8,8 @@ use crate::derived::derived_properties;
 use crate::graph::{Edge, Element, Graph};
 use crate::ir::KirDocument;
 use crate::metamodel::{
-    collect_specialization_ancestors, effective_properties_with_derived, query_element_attributes,
     AttributeRow, AttributeValueSource, ElementSummary, MetamodelAttributeRegistry,
+    collect_specialization_ancestors, effective_properties_with_derived, query_element_attributes,
 };
 use crate::runtime::{Runtime, RuntimeError};
 
@@ -455,7 +455,10 @@ pub fn metatype_explorer_view(
     })
 }
 
-pub fn l2_explorer_view(graph: &Graph, request: &L2ExplorerRequestDto) -> Option<L2ExplorerGraphDto> {
+pub fn l2_explorer_view(
+    graph: &Graph,
+    request: &L2ExplorerRequestDto,
+) -> Option<L2ExplorerGraphDto> {
     let seed = graph.element_by_element_id(&request.seed_id)?;
     if seed.layer != 2 {
         return None;
@@ -1184,12 +1187,12 @@ mod tests {
 
     use serde_json::Value;
 
-    use crate::{repo_path, Graph, KirDocument, KirElement, MetamodelAttributeRegistry, Runtime};
+    use crate::{Graph, KirDocument, KirElement, MetamodelAttributeRegistry, Runtime, repo_path};
 
     use super::{
-        document_model_metadata_view, element_details, graph_view, l2_explorer_view,
-        library_tree_view, metatype_explorer_view, model_metadata_view, requirements_table_view,
-        search_view, GraphScope, L2ExplorerRequestDto, MetatypeExplorerRequestDto,
+        GraphScope, L2ExplorerRequestDto, MetatypeExplorerRequestDto, document_model_metadata_view,
+        element_details, graph_view, l2_explorer_view, library_tree_view, metatype_explorer_view,
+        model_metadata_view, requirements_table_view, search_view,
     };
 
     #[test]
@@ -1542,7 +1545,10 @@ mod tests {
                             "features".to_string(),
                             Value::Array(vec![Value::String("feature.Vehicle.engine".to_string())]),
                         ),
-                        ("related".to_string(), Value::String("type.Engine".to_string())),
+                        (
+                            "related".to_string(),
+                            Value::String("type.Engine".to_string()),
+                        ),
                     ]),
                 },
                 KirElement {

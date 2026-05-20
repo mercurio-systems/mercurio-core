@@ -6,10 +6,10 @@ use mercurio_core::frontend::sysml::parse_sysml_recovering;
 use mercurio_core::{
     AssessmentSpec, AssessmentStatus, DiagramRenderRequestDto, ExecutionContext, Fact, Graph,
     KirDocument, MetamodelAttributeRegistry, RulePack, Runtime, RuntimeAssessmentRequest,
-    SourceLanguage, compile_kerml_text,
-    compile_sysml_text_with_context_report, format_text, lint_text, list_diagram_kinds,
-    load_default_rulepacks, parse_kerml, render_diagram, requirements_table_view,
-    run_graph_assessment, run_runtime_assessment, sysml_module_assessment_facts,
+    SourceLanguage, compile_kerml_text, compile_sysml_text_with_context_report, format_text,
+    lint_text, list_diagram_kinds, load_default_rulepacks, parse_kerml, render_diagram,
+    requirements_table_view, run_graph_assessment, run_runtime_assessment,
+    sysml_module_assessment_facts,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -230,7 +230,10 @@ pub fn wasm_run_source_assessment(input: &str, request: JsValue) -> JsValue {
                 }
             ));
         }
-        transcript.push(format!("result: {}", if passed { "pass" } else { "failed" }));
+        transcript.push(format!(
+            "result: {}",
+            if passed { "pass" } else { "failed" }
+        ));
 
         Ok(success(
             json!({
@@ -260,8 +263,7 @@ pub fn wasm_run_source_evaluation(input: &str, request: JsValue) -> JsValue {
         }
 
         let stdlib = load_stdlib(None)?;
-        let report =
-            compile_sysml_text_with_context_report(input, &request.filename, &[], &stdlib);
+        let report = compile_sysml_text_with_context_report(input, &request.filename, &[], &stdlib);
         let diagnostics = report
             .diagnostics
             .iter()
@@ -296,19 +298,30 @@ pub fn wasm_run_source_evaluation(input: &str, request: JsValue) -> JsValue {
         let runtime = Runtime::from_document(merged_document.clone())?;
         let mut scenario_results = Vec::new();
         for scenario in request.scenarios {
-            let feature_id = find_feature_id(&merged_document, &scenario.feature_name)
-                .ok_or_else(|| WasmError::new("evaluation", format!("feature `{}` not found", scenario.feature_name)))?;
+            let feature_id =
+                find_feature_id(&merged_document, &scenario.feature_name).ok_or_else(|| {
+                    WasmError::new(
+                        "evaluation",
+                        format!("feature `{}` not found", scenario.feature_name),
+                    )
+                })?;
             let owner_id = scenario
                 .owner_name
                 .as_deref()
                 .and_then(|owner_name| find_owner_id_by_name(&merged_document, owner_name))
                 .or_else(|| find_owner_id_for_feature(&merged_document, &feature_id))
-                .ok_or_else(|| WasmError::new("evaluation", format!("owner for feature `{}` not found", scenario.feature_name)))?;
+                .ok_or_else(|| {
+                    WasmError::new(
+                        "evaluation",
+                        format!("owner for feature `{}` not found", scenario.feature_name),
+                    )
+                })?;
             let mut context = ExecutionContext::default();
             for parameter in &scenario.parameters {
-                context
-                    .values
-                    .insert((owner_id.clone(), parameter.name.clone()), parameter.value.clone());
+                context.values.insert(
+                    (owner_id.clone(), parameter.name.clone()),
+                    parameter.value.clone(),
+                );
             }
             let result = runtime.evaluate(&feature_id, &owner_id, &context);
             scenario_results.push(match result {
@@ -368,7 +381,10 @@ pub fn wasm_parse_sysml_snippet(input: &str, request: JsValue) -> JsValue {
                         "symbols": [],
                         "outline": [],
                     }),
-                    [("runtime", json!("wasm")), ("sourceName", json!(request.path))],
+                    [
+                        ("runtime", json!("wasm")),
+                        ("sourceName", json!(request.path)),
+                    ],
                 ));
             }
         };
@@ -379,7 +395,10 @@ pub fn wasm_parse_sysml_snippet(input: &str, request: JsValue) -> JsValue {
                     "symbols": [],
                     "outline": [],
                 }),
-                [("runtime", json!("wasm")), ("sourceName", json!(request.path))],
+                [
+                    ("runtime", json!("wasm")),
+                    ("sourceName", json!(request.path)),
+                ],
             ));
         }
 
@@ -388,7 +407,13 @@ pub fn wasm_parse_sysml_snippet(input: &str, request: JsValue) -> JsValue {
         if parse_report.module.members.is_empty() {
             if let Some(package) = &parse_report.module.package {
                 let id = package.name.as_colon_string();
-                outline.push(package_outline_node(&id, &id, &package.span, &package.members, &mut symbols));
+                outline.push(package_outline_node(
+                    &id,
+                    &id,
+                    &package.span,
+                    &package.members,
+                    &mut symbols,
+                ));
             }
         } else {
             for declaration in &parse_report.module.members {
@@ -410,7 +435,10 @@ pub fn wasm_parse_sysml_snippet(input: &str, request: JsValue) -> JsValue {
                 "symbols": symbols,
                 "outline": outline,
             }),
-            [("runtime", json!("wasm")), ("sourceName", json!(request.path))],
+            [
+                ("runtime", json!("wasm")),
+                ("sourceName", json!(request.path)),
+            ],
         ))
     })
 }
@@ -914,15 +942,24 @@ fn declaration_outline_node(
         }
         Declaration::PartDefinition(definition) => {
             let id = scoped_ast_id(owner, &definition.name);
-            push_ast_symbol(symbols, &id, "PartDefinition", &definition.name, &definition.span);
+            push_ast_symbol(
+                symbols,
+                &id,
+                "PartDefinition",
+                &definition.name,
+                &definition.span,
+            );
             let mut children = definition
                 .members
                 .iter()
                 .map(|member| declaration_outline_node(member, Some(&id), symbols))
                 .collect::<Vec<_>>();
-            children.extend(definition.part_members.iter().map(|member| {
-                part_usage_outline_node(member, Some(&id), symbols)
-            }));
+            children.extend(
+                definition
+                    .part_members
+                    .iter()
+                    .map(|member| part_usage_outline_node(member, Some(&id), symbols)),
+            );
             json!({
                 "id": id,
                 "elementId": id,
