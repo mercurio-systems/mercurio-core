@@ -199,13 +199,72 @@ public final class PilotModelExporter {
         document.metadata = metadata;
         document.cases = new ArrayList<>();
 
+        System.setProperty("org.eclipse.emf.common.util.ReferenceClearingQueue", "false");
+
+        Instant setupStart = Instant.now();
+        SysMLInteractive interactive = SysMLInteractive.getInstance();
+        interactive.getLibraryIndexCache().setIndexDisabled(true);
+        interactive.setVerbose(false);
+
+        Instant loadLibraryStart = Instant.now();
+        interactive.loadLibrary(libraryRoot.toString());
+        long loadLibraryMs = elapsedMillis(loadLibraryStart, Instant.now());
+
+        Map<Path, Resource> resourcesByPath = new LinkedHashMap<>();
+        Instant loadInputsStart = Instant.now();
+        for (BatchSpecCase batchCase : spec.cases) {
+            for (String inputFile : batchCase.input_files) {
+                Path normalizedPath = Paths.get(inputFile).toAbsolutePath().normalize();
+                if (resourcesByPath.containsKey(normalizedPath)) {
+                    continue;
+                }
+                Resource resource = interactive.readResource(normalizedPath.toString());
+                interactive.addInputResource(resource);
+                resourcesByPath.put(normalizedPath, resource);
+            }
+        }
+        long loadInputsMs = elapsedMillis(loadInputsStart, Instant.now());
+
+        String failureStage = null;
+        String exceptionType = null;
+        String exceptionMessage = null;
+        Instant resolveStart = Instant.now();
+        try {
+            ResourceSet resourceSet = interactive.getResourceSet();
+            resourceSet.getResources().forEach(resource -> EcoreUtil2.resolveLazyCrossReferences(resource, null));
+            interactive.resolveAllInputResources();
+            ElementUtil.transformAll(resourceSet, true);
+            resourceSet.getResources().forEach(resource -> EcoreUtil2.resolveLazyCrossReferences(resource, null));
+        } catch (Exception ex) {
+            failureStage = "resolve_transform";
+            exceptionType = ex.getClass().getName();
+            exceptionMessage = clean(ex.getMessage()) == null ? ex.toString() : clean(ex.getMessage());
+        }
+        long resolveMs = elapsedMillis(resolveStart, Instant.now());
+        long setupTotalMs = elapsedMillis(setupStart, Instant.now());
+
         for (BatchSpecCase batchCase : spec.cases) {
             List<Path> inputFiles = batchCase.input_files.stream()
                 .map(path -> Paths.get(path).toAbsolutePath().normalize())
                 .toList();
+            Path targetFile = inputFiles.isEmpty() ? null : inputFiles.get(inputFiles.size() - 1);
             document.cases.add(new BatchDiagnosticsCase(
                 batchCase.relative_path,
-                collectDiagnostics(libraryRoot, inputFiles)
+                collectDiagnosticsFromLoadedResources(
+                    libraryRoot,
+                    inputFiles,
+                    targetFile,
+                    resourcesByPath,
+                    setupTotalMs,
+                    List.of(
+                        new DiagnosticPhaseTiming("load_library", loadLibraryMs),
+                        new DiagnosticPhaseTiming("load_unique_inputs", loadInputsMs),
+                        new DiagnosticPhaseTiming("resolve_transform", resolveMs)
+                    ),
+                    failureStage,
+                    exceptionType,
+                    exceptionMessage
+                )
             ));
         }
 
@@ -409,6 +468,70 @@ public final class PilotModelExporter {
         }
 
         document.timings.total_ms = elapsedMillis(totalStart, Instant.now());
+        return document;
+    }
+
+    private static DiagnosticRunDocument collectDiagnosticsFromLoadedResources(
+        Path libraryRoot,
+        List<Path> inputFiles,
+        Path targetFile,
+        Map<Path, Resource> resourcesByPath,
+        long totalMs,
+        List<DiagnosticPhaseTiming> phases,
+        String failureStage,
+        String exceptionType,
+        String exceptionMessage
+    ) {
+        Path repoRoot = libraryRoot.getParent();
+
+        DiagnosticRunDocument document = new DiagnosticRunDocument();
+        DiagnosticRunMetadata metadata = new DiagnosticRunMetadata();
+        metadata.library_root = libraryRoot.toString();
+        metadata.input_files = inputFiles.stream().map(Path::toString).toList();
+        metadata.exported_at_utc = Instant.now().toString();
+        metadata.pilot_version = pilotVersion();
+        document.metadata = metadata;
+        document.status = "ok";
+        document.diagnostics = new ArrayList<>();
+        document.timings = new DiagnosticTimings();
+        document.timings.total_ms = totalMs;
+        document.timings.phases = phases;
+
+        Set<CompileDiagnosticKey> seenDiagnostics = new LinkedHashSet<>();
+        Resource targetResource = targetFile == null ? null : resourcesByPath.get(targetFile);
+        collectResourceDiagnostics(
+            targetResource,
+            repoRoot,
+            "resolve_transform",
+            document.diagnostics,
+            seenDiagnostics
+        );
+
+        if (exceptionMessage != null) {
+            document.status = "error";
+            document.failure_stage = failureStage;
+            document.exception_type = exceptionType;
+            document.exception_message = exceptionMessage;
+            CompileDiagnosticDocument diagnostic = new CompileDiagnosticDocument(
+                failureStage,
+                targetFile == null ? null : normalizeRelativePath(repoRoot.relativize(targetFile)),
+                null,
+                null,
+                exceptionMessage,
+                "exception"
+            );
+            if (seenDiagnostics.add(CompileDiagnosticKey.from(diagnostic))) {
+                document.diagnostics.add(diagnostic);
+            }
+        }
+
+        if (!document.diagnostics.isEmpty()) {
+            document.status = "error";
+            if (document.failure_stage == null) {
+                document.failure_stage = firstFailureStage(document.diagnostics);
+            }
+        }
+
         return document;
     }
 

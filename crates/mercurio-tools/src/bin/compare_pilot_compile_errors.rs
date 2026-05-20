@@ -5,7 +5,9 @@ use std::process::Command;
 use std::time::Instant;
 
 use mercurio_core::frontend::diagnostics::Diagnostic;
-use mercurio_core::frontend::sysml::{compile_sysml_module, parse_sysml};
+use mercurio_core::source_set::{
+    SourceCompileContext, SourceDocument, compile_source_document_with_context,
+};
 use mercurio_core::{KirDocument, default_stdlib_path, repo_path};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -18,8 +20,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let corpus_seed = PilotCorpusSeed::load()?;
     let pilot_runner = PilotRunner::new(&args.pilot_root)?;
 
-    match (&args.relative_path, &args.corpus_name) {
-        (Some(relative_path), None) => {
+    match &args.relative_path {
+        Some(relative_path) => {
             let output = run_compare_case(&pilot_runner, relative_path, &corpus_seed)?;
             if let Some(parent) = args.output_path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -39,14 +41,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  mercurio total ms: {}", output.mercurio.timings.total_ms);
             println!("  pilot total ms: {}", output.pilot.timings.total_ms);
         }
-        (None, Some(corpus_name)) => {
-            let relative_paths = corpus_seed
-                .corpus(corpus_name)
-                .ok_or_else(|| format!("unknown corpus `{corpus_name}`"))?;
+        None => {
+            let (corpus_name, relative_paths) = args.corpus_paths(&corpus_seed)?;
+            let pilot_cases = export_diagnostics_corpus_from_pilot(
+                &pilot_runner,
+                &corpus_name,
+                &relative_paths,
+                &corpus_seed,
+            )?;
             let mut cases = Vec::new();
 
-            for relative_path in relative_paths {
-                match run_compare_case(&pilot_runner, relative_path, &corpus_seed) {
+            for relative_path in &relative_paths {
+                match run_compare_case_from_batch(
+                    &pilot_runner,
+                    relative_path,
+                    &corpus_seed,
+                    &pilot_cases,
+                ) {
                     Ok(output) => {
                         println!(
                             "checked {}: rust={} pilot={} status_match={} primary_match={}",
@@ -62,7 +73,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("failed {}: {}", relative_path, err);
                         cases.push(CorpusCaseSummary::failure(
                             relative_path.to_string(),
-                            corpus_seed.support_paths_for(relative_path).len(),
+                            corpus_seed
+                                .support_paths_for_case(&args.pilot_root, relative_path)
+                                .len(),
                             err.to_string(),
                         ));
                     }
@@ -72,7 +85,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let corpus_output = CorpusCompareOutput {
                 generated_at_utc: now_utc_rfc3339()?,
                 pilot_root: args.pilot_root.display().to_string(),
-                corpus_name: corpus_name.clone(),
+                corpus_name,
                 case_count: cases.len(),
                 aggregate: CorpusAggregate::from_cases(&cases),
                 cases,
@@ -107,7 +120,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 corpus_output.aggregate.pilot_only_fail_cases
             );
         }
-        _ => unreachable!(),
     }
 
     Ok(())
@@ -118,7 +130,39 @@ struct Args {
     pilot_root: PathBuf,
     relative_path: Option<String>,
     corpus_name: Option<String>,
+    paths_file: Option<PathBuf>,
     output_path: PathBuf,
+}
+
+impl Args {
+    fn corpus_paths(
+        &self,
+        corpus_seed: &PilotCorpusSeed,
+    ) -> Result<(String, Vec<String>), Box<dyn std::error::Error>> {
+        if let Some(paths_file) = &self.paths_file {
+            let paths = std::fs::read_to_string(paths_file)?
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            let name = paths_file
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("paths")
+                .to_string();
+            return Ok((name, paths));
+        }
+
+        let corpus_name = self
+            .corpus_name
+            .as_deref()
+            .ok_or("provide --relative-path, --corpus, or --paths-file")?;
+        Ok((
+            corpus_name.to_string(),
+            corpus_seed.corpus_paths(corpus_name, &self.pilot_root)?,
+        ))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,8 +187,97 @@ impl PilotCorpusSeed {
             .unwrap_or(&[])
     }
 
-    fn corpus(&self, name: &str) -> Option<&[String]> {
-        self.corpora.get(name).map(Vec::as_slice)
+    fn support_paths_for_case(&self, pilot_root: &Path, relative_path: &str) -> Vec<String> {
+        let mut support_paths = Vec::new();
+        for path in self.support_paths_for(relative_path) {
+            push_unique(&mut support_paths, path.clone());
+        }
+        for path in same_folder_sysml_paths(pilot_root, relative_path) {
+            if path != relative_path {
+                push_unique(&mut support_paths, path);
+            }
+        }
+        support_paths
+    }
+
+    fn corpus_paths(
+        &self,
+        name: &str,
+        pilot_root: &Path,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        if name == "all" {
+            return discover_all_pilot_examples(pilot_root);
+        }
+        self.corpora
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("unknown corpus `{name}`").into())
+    }
+}
+
+fn discover_all_pilot_examples(
+    pilot_root: &Path,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut stack = vec![
+        pilot_root.join("sysml/src/examples"),
+        pilot_root.join("sysml/src/training"),
+        pilot_root.join("sysml/src/validation"),
+    ];
+    let mut files = Vec::new();
+
+    while let Some(path) = stack.pop() {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(&path)? {
+                stack.push(entry?.path());
+            }
+            continue;
+        }
+
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "sysml")
+        {
+            files.push(
+                path.strip_prefix(pilot_root)?
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        }
+    }
+
+    files.sort();
+    Ok(files)
+}
+
+fn same_folder_sysml_paths(pilot_root: &Path, relative_path: &str) -> Vec<String> {
+    let Some(parent) = Path::new(relative_path).parent() else {
+        return Vec::new();
+    };
+    let folder = pilot_root.join(parent);
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+
+    let mut paths = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "sysml")
+        })
+        .filter_map(|path| {
+            path.strip_prefix(pilot_root)
+                .ok()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+fn push_unique(paths: &mut Vec<String>, path: String) {
+    if !paths.contains(&path) {
+        paths.push(path);
     }
 }
 
@@ -379,10 +512,33 @@ struct PilotCompileDiagnostic {
     message: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct PilotDiagnosticsBatchDocument {
+    cases: Vec<PilotDiagnosticsBatchCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PilotDiagnosticsBatchCase {
+    relative_path: String,
+    result: PilotDiagnosticRunDocument,
+}
+
+#[derive(Debug, Serialize)]
+struct PilotCorpusSpec<'a> {
+    cases: Vec<PilotCorpusSpecCase<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct PilotCorpusSpecCase<'a> {
+    relative_path: &'a str,
+    input_files: Vec<String>,
+}
+
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let mut pilot_root = PathBuf::from(DEFAULT_PILOT_ROOT);
     let mut relative_path = None;
     let mut corpus_name = None;
+    let mut paths_file = None;
     let mut output_path = repo_path("target/pilot_compile_error_compare.json");
     let args = env::args().skip(1).collect::<Vec<_>>();
     let mut index = 0;
@@ -410,6 +566,12 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
                         .to_string(),
                 );
             }
+            "--paths-file" => {
+                index += 1;
+                paths_file = Some(PathBuf::from(
+                    args.get(index).ok_or("missing value for --paths-file")?,
+                ));
+            }
             "--out" => {
                 index += 1;
                 output_path = PathBuf::from(args.get(index).ok_or("missing value for --out")?);
@@ -423,21 +585,25 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
         index += 1;
     }
 
-    if relative_path.is_some() == corpus_name.is_some() {
-        return Err("provide exactly one of --relative-path or --corpus".into());
+    let selector_count = usize::from(relative_path.is_some())
+        + usize::from(corpus_name.is_some())
+        + usize::from(paths_file.is_some());
+    if selector_count != 1 {
+        return Err("provide exactly one of --relative-path, --corpus, or --paths-file".into());
     }
 
     Ok(Args {
         pilot_root,
         relative_path,
         corpus_name,
+        paths_file,
         output_path,
     })
 }
 
 fn print_usage() {
     println!(
-        "Usage: compare_pilot_compile_errors --pilot-root <pilot-root> (--relative-path <path> | --corpus <name>) [--out <path>]"
+        "Usage: compare_pilot_compile_errors --pilot-root <pilot-root> (--relative-path <path> | --corpus <name|all> | --paths-file <path>) [--out <path>]"
     );
 }
 
@@ -446,9 +612,34 @@ fn run_compare_case(
     relative_path: &str,
     corpus_seed: &PilotCorpusSeed,
 ) -> Result<CompareOutput, Box<dyn std::error::Error>> {
-    let support_paths = corpus_seed.support_paths_for(relative_path).to_vec();
+    let support_paths = corpus_seed.support_paths_for_case(&pilot_runner.pilot_root, relative_path);
     let mercurio = build_mercurio_case(&pilot_runner.pilot_root, relative_path, &support_paths)?;
     let pilot = build_pilot_case(pilot_runner, relative_path, &support_paths)?;
+    let comparison = compare_results(&mercurio, &pilot);
+
+    Ok(CompareOutput {
+        generated_at_utc: now_utc_rfc3339()?,
+        pilot_root: pilot_runner.pilot_root.display().to_string(),
+        relative_path: relative_path.to_string(),
+        support_paths,
+        comparison,
+        mercurio,
+        pilot,
+    })
+}
+
+fn run_compare_case_from_batch(
+    pilot_runner: &PilotRunner,
+    relative_path: &str,
+    corpus_seed: &PilotCorpusSeed,
+    pilot_cases: &BTreeMap<String, PilotDiagnosticRunDocument>,
+) -> Result<CompareOutput, Box<dyn std::error::Error>> {
+    let support_paths = corpus_seed.support_paths_for_case(&pilot_runner.pilot_root, relative_path);
+    let mercurio = build_mercurio_case(&pilot_runner.pilot_root, relative_path, &support_paths)?;
+    let pilot_document = pilot_cases
+        .get(relative_path)
+        .ok_or_else(|| format!("pilot batch diagnostics missing case `{relative_path}`"))?;
+    let pilot = pilot_result_from_document(relative_path, pilot_document);
     let comparison = compare_results(&mercurio, &pilot);
 
     Ok(CompareOutput {
@@ -471,120 +662,84 @@ fn build_mercurio_case(
     let mut phases = Vec::new();
 
     let load_stdlib_start = Instant::now();
-    let mut augmented = KirDocument::from_path(&default_stdlib_path())?;
+    let augmented = KirDocument::from_path(&default_stdlib_path())?;
     phases.push(PhaseTiming {
         name: "load_stdlib_json".to_string(),
         duration_ms: elapsed_ms(load_stdlib_start),
     });
 
-    for support_path in support_paths {
-        let source_text = std::fs::read_to_string(pilot_root.join(support_path))?;
-        let parse_start = Instant::now();
-        let module = match parse_sysml(&source_text) {
-            Ok(module) => {
+    let read_parse_start = Instant::now();
+    let source_documents = read_source_documents(pilot_root, support_paths, relative_path)?;
+    phases.push(PhaseTiming {
+        name: "read_parse_source_set".to_string(),
+        duration_ms: elapsed_ms(read_parse_start),
+    });
+
+    let context_start = Instant::now();
+    let compile_context =
+        match SourceCompileContext::from_source_documents(&source_documents, &augmented) {
+            Ok(context) => {
                 phases.push(PhaseTiming {
-                    name: format!("parse_support:{support_path}"),
-                    duration_ms: elapsed_ms(parse_start),
+                    name: "build_resolver_context".to_string(),
+                    duration_ms: elapsed_ms(context_start),
                 });
-                module
+                context
             }
             Err(diagnostic) => {
                 phases.push(PhaseTiming {
-                    name: format!("parse_support:{support_path}"),
-                    duration_ms: elapsed_ms(parse_start),
+                    name: "build_resolver_context".to_string(),
+                    duration_ms: elapsed_ms(context_start),
                 });
                 return Ok(error_result(
-                    "parse",
-                    Some(support_path.to_string()),
-                    diagnostic_to_normalized("parse", Some(support_path), &diagnostic),
+                    "resolve_context",
+                    None,
+                    diagnostic_to_normalized("resolve_context", None, &diagnostic),
                     start,
                     phases,
                 ));
             }
         };
 
-        let compile_start = Instant::now();
-        match compile_sysml_module(&module, support_path, &augmented) {
-            Ok(document) => {
-                phases.push(PhaseTiming {
-                    name: format!("compile_support:{support_path}"),
-                    duration_ms: elapsed_ms(compile_start),
-                });
-                augmented.elements.extend(document.elements);
-            }
-            Err(diagnostic) => {
-                phases.push(PhaseTiming {
-                    name: format!("compile_support:{support_path}"),
-                    duration_ms: elapsed_ms(compile_start),
-                });
-                return Ok(error_result(
-                    "resolve_transpile",
-                    Some(support_path.to_string()),
-                    diagnostic_to_normalized("resolve_transpile", Some(support_path), &diagnostic),
-                    start,
-                    phases,
-                ));
-            }
-        }
-    }
-
-    let source_text = std::fs::read_to_string(pilot_root.join(relative_path))?;
-    let parse_start = Instant::now();
-    let module = match parse_sysml(&source_text) {
-        Ok(module) => {
-            phases.push(PhaseTiming {
-                name: "parse_l2_model".to_string(),
-                duration_ms: elapsed_ms(parse_start),
-            });
-            module
-        }
-        Err(diagnostic) => {
-            phases.push(PhaseTiming {
-                name: "parse_l2_model".to_string(),
-                duration_ms: elapsed_ms(parse_start),
-            });
-            return Ok(error_result(
-                "parse",
-                Some(relative_path.to_string()),
-                diagnostic_to_normalized("parse", Some(relative_path), &diagnostic),
-                start,
-                phases,
-            ));
-        }
-    };
+    let target_document = source_documents
+        .iter()
+        .find(|file| file.path == relative_path)
+        .ok_or_else(|| format!("source set missing target `{relative_path}`"))?;
 
     let compile_start = Instant::now();
-    match compile_sysml_module(&module, relative_path, &augmented) {
-        Ok(_) => {
-            phases.push(PhaseTiming {
-                name: "compile_l2_model".to_string(),
-                duration_ms: elapsed_ms(compile_start),
-            });
-            Ok(EngineCompileResult {
-                status: "ok".to_string(),
-                failure_stage: None,
-                failure_input: None,
-                diagnostics: Vec::new(),
-                timings: EngineTimings {
-                    total_ms: elapsed_ms(start),
-                    phases,
-                },
-            })
-        }
-        Err(diagnostic) => {
-            phases.push(PhaseTiming {
-                name: "compile_l2_model".to_string(),
-                duration_ms: elapsed_ms(compile_start),
-            });
-            Ok(error_result(
+    if let Err(diagnostic) =
+        compile_source_document_with_context(target_document, &compile_context, &augmented)
+    {
+        phases.push(PhaseTiming {
+            name: "compile_target_with_source_set".to_string(),
+            duration_ms: elapsed_ms(compile_start),
+        });
+        return Ok(error_result(
+            "resolve_transpile",
+            Some(target_document.path.clone()),
+            diagnostic_to_normalized(
                 "resolve_transpile",
-                Some(relative_path.to_string()),
-                diagnostic_to_normalized("resolve_transpile", Some(relative_path), &diagnostic),
-                start,
-                phases,
-            ))
-        }
+                Some(&target_document.path),
+                &diagnostic,
+            ),
+            start,
+            phases,
+        ));
     }
+    phases.push(PhaseTiming {
+        name: "compile_target_with_source_set".to_string(),
+        duration_ms: elapsed_ms(compile_start),
+    });
+
+    Ok(EngineCompileResult {
+        status: "ok".to_string(),
+        failure_stage: None,
+        failure_input: None,
+        diagnostics: Vec::new(),
+        timings: EngineTimings {
+            total_ms: elapsed_ms(start),
+            phases,
+        },
+    })
 }
 
 fn build_pilot_case(
@@ -596,6 +751,22 @@ fn build_pilot_case(
     let document: PilotDiagnosticRunDocument =
         serde_json::from_str(&std::fs::read_to_string(&export_path)?)?;
     Ok(pilot_result_from_document(relative_path, &document))
+}
+
+fn read_source_documents(
+    pilot_root: &Path,
+    support_paths: &[String],
+    relative_path: &str,
+) -> Result<Vec<SourceDocument>, Box<dyn std::error::Error>> {
+    let mut paths = support_paths.to_vec();
+    paths.push(relative_path.to_string());
+    paths
+        .into_iter()
+        .map(|path| {
+            let content = std::fs::read_to_string(pilot_root.join(&path))?;
+            Ok(SourceDocument::new(path.clone(), content))
+        })
+        .collect()
 }
 
 fn pilot_result_from_document(
@@ -830,6 +1001,193 @@ fn run_java_diagnostics_exporter(
     }
 
     Ok(export_path)
+}
+
+fn export_diagnostics_corpus_from_pilot(
+    pilot_runner: &PilotRunner,
+    corpus_name: &str,
+    relative_paths: &[String],
+    corpus_seed: &PilotCorpusSeed,
+) -> Result<BTreeMap<String, PilotDiagnosticRunDocument>, Box<dyn std::error::Error>> {
+    let mut all_cases = BTreeMap::new();
+    for (folder, folder_paths) in group_paths_by_folder(relative_paths) {
+        let group_slug = format!(
+            "{}.mf2.{}",
+            corpus_name.replace(['\\', '/', ' '], "_"),
+            relative_path_slug(&folder)
+        );
+        all_cases.extend(export_diagnostics_path_group_from_pilot(
+            pilot_runner,
+            &group_slug,
+            &folder_paths,
+            corpus_seed,
+        )?);
+    }
+    Ok(all_cases)
+}
+
+fn export_diagnostics_path_group_from_pilot(
+    pilot_runner: &PilotRunner,
+    group_slug: &str,
+    relative_paths: &[String],
+    corpus_seed: &PilotCorpusSeed,
+) -> Result<BTreeMap<String, PilotDiagnosticRunDocument>, Box<dyn std::error::Error>> {
+    let export_path = repo_path(&format!(
+        "target/pilot_compile_diagnostics.batch.{group_slug}.json"
+    ));
+    let spec_path = repo_path(&format!(
+        "target/pilot_compile_diagnostics.batch.{group_slug}.spec.json"
+    ));
+
+    let spec = PilotCorpusSpec {
+        cases: relative_paths
+            .iter()
+            .map(|relative_path| PilotCorpusSpecCase {
+                relative_path,
+                input_files: corpus_seed
+                    .support_paths_for_case(&pilot_runner.pilot_root, relative_path)
+                    .iter()
+                    .map(|path| pilot_runner.pilot_root.join(path).display().to_string())
+                    .chain(std::iter::once(
+                        pilot_runner
+                            .pilot_root
+                            .join(relative_path)
+                            .display()
+                            .to_string(),
+                    ))
+                    .collect(),
+            })
+            .collect(),
+    };
+    let spec_json = serde_json::to_string_pretty(&spec)?;
+
+    if let Some(cases) =
+        load_existing_diagnostics_batch(&export_path, &spec_path, &spec_json, relative_paths)?
+    {
+        return Ok(cases);
+    }
+
+    if let Some(parent) = spec_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&spec_path, spec_json)?;
+
+    run_java_diagnostics_exporter_batch(pilot_runner, &spec_path, &export_path)?;
+
+    let document: PilotDiagnosticsBatchDocument =
+        serde_json::from_str(&std::fs::read_to_string(&export_path)?)?;
+    Ok(document
+        .cases
+        .into_iter()
+        .map(|case| (case.relative_path, case.result))
+        .collect())
+}
+
+fn group_paths_by_folder(relative_paths: &[String]) -> BTreeMap<String, Vec<String>> {
+    let mut groups = BTreeMap::new();
+    for relative_path in relative_paths {
+        let folder = Path::new(relative_path)
+            .parent()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        groups
+            .entry(folder)
+            .or_insert_with(Vec::new)
+            .push(relative_path.clone());
+    }
+    groups
+}
+
+fn load_existing_diagnostics_batch(
+    export_path: &Path,
+    spec_path: &Path,
+    expected_spec_json: &str,
+    relative_paths: &[String],
+) -> Result<Option<BTreeMap<String, PilotDiagnosticRunDocument>>, Box<dyn std::error::Error>> {
+    if !export_path.exists() || !spec_path.exists() {
+        return Ok(None);
+    }
+    if std::fs::read_to_string(spec_path)? != expected_spec_json {
+        return Ok(None);
+    }
+
+    let document: PilotDiagnosticsBatchDocument =
+        serde_json::from_str(&std::fs::read_to_string(export_path)?)?;
+    if document.cases.len() != relative_paths.len() {
+        return Ok(None);
+    }
+
+    let cases = document
+        .cases
+        .into_iter()
+        .map(|case| (case.relative_path, case.result))
+        .collect::<BTreeMap<_, _>>();
+    if relative_paths.iter().all(|path| cases.contains_key(path)) {
+        Ok(Some(cases))
+    } else {
+        Ok(None)
+    }
+}
+
+fn run_java_diagnostics_exporter_batch(
+    pilot_runner: &PilotRunner,
+    spec_path: &Path,
+    export_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = export_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let classes_dir = absolute_path(&pilot_runner.classes_dir)?;
+    let interactive_jar = absolute_path(&pilot_runner.interactive_jar)?;
+    let spec_path = absolute_path(spec_path)?;
+    let export_path = absolute_path(export_path)?;
+    let lib_dir = interactive_jar
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("lib")
+        .to_path_buf();
+    let separator = if cfg!(windows) { ";" } else { ":" };
+    let classpath = format!(
+        "{}{}{}{}{}",
+        java_path_string(&classes_dir),
+        separator,
+        java_path_string(&interactive_jar),
+        separator,
+        java_path_string(&lib_dir.join("*"))
+    );
+
+    let status = if cfg!(windows) {
+        let script_path = repo_path("target/run_pilot_compile_diagnostics_batch.ps1");
+        let script = format!(
+            "$cp = '{}'\njava -cp $cp dev.mercurio.pilot.PilotModelExporter --diagnostics-batch '{}' '{}' '{}'\n",
+            classpath.replace('\'', "''"),
+            java_path_string(&pilot_runner.library_root).replace('\'', "''"),
+            java_path_string(&spec_path).replace('\'', "''"),
+            java_path_string(&export_path).replace('\'', "''"),
+        );
+        std::fs::write(&script_path, script)?;
+        Command::new("powershell")
+            .arg("-File")
+            .arg(script_path)
+            .status()?
+    } else {
+        Command::new("java")
+            .arg("-cp")
+            .arg(classpath)
+            .arg("dev.mercurio.pilot.PilotModelExporter")
+            .arg("--diagnostics-batch")
+            .arg(&pilot_runner.library_root)
+            .arg(&spec_path)
+            .arg(&export_path)
+            .status()?
+    };
+
+    if !status.success() {
+        return Err("failed to run Java pilot diagnostics batch exporter".into());
+    }
+
+    Ok(())
 }
 
 fn relative_path_slug(relative_path: &str) -> String {

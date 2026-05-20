@@ -734,6 +734,18 @@ impl Parser {
                     modifiers,
                 )?
             }
+            TokenKind::Identifier(ref value)
+                if matches!(value.as_str(), "assert" | "assume" | "require")
+                    && matches!(self.next_kind(), Some(TokenKind::Identifier(next)) if next == "constraint") =>
+            {
+                self.parse_composite_feature_declaration(
+                    value,
+                    "constraint",
+                    value,
+                    docs,
+                    modifiers,
+                )?
+            }
             TokenKind::Hash => self.parse_hashed_declaration(docs, modifiers)?,
             TokenKind::Identifier(ref value) if self.should_parse_as_feature_keyword(value) => {
                 self.parse_feature_declaration(value, docs, modifiers)?
@@ -856,7 +868,7 @@ impl Parser {
                         Some(TokenKind::Package | TokenKind::Import | TokenKind::Part)
                     ) || matches!(
                         self.next_kind(),
-                        Some(TokenKind::Identifier(next)) if self.should_parse_as_feature_keyword(next)
+                        Some(TokenKind::Identifier(next)) if is_feature_keyword(next)
                     )) =>
             {
                 let mut hashed_modifiers = modifiers;
@@ -980,12 +992,18 @@ impl Parser {
 
         while !matches!(
             self.peek_kind(),
-            TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Eof
+            TokenKind::Semicolon | TokenKind::LBrace | TokenKind::RBrace | TokenKind::Eof
         ) {
             self.advance();
         }
 
-        let end = self.finish_usage("control-flow reference", false)?;
+        let mut body_closed = false;
+        if matches!(self.peek_kind(), TokenKind::LBrace) {
+            self.consume_opaque_block_with_open()?;
+            body_closed = true;
+        }
+
+        let end = self.finish_usage("control-flow reference", body_closed)?;
         Ok(Declaration::GenericUsage(GenericUsageDecl {
             keyword: "succession".to_string(),
             name,
@@ -1072,7 +1090,11 @@ impl Parser {
         }
         let path = self.parse_import_path()?;
         self.consume_suffix_adornments()?;
-        let end = self.expect(TokenKind::Semicolon, "expected `;` after import")?;
+        let end = if matches!(self.peek_kind(), TokenKind::LBrace) {
+            self.consume_opaque_block_with_open()?
+        } else {
+            self.expect(TokenKind::Semicolon, "expected `;` after import")?
+        };
 
         Ok(ImportDecl {
             path,
@@ -1257,6 +1279,55 @@ impl Parser {
         let mut leading_specialization = None;
 
         let explicit_name = if keyword == "accept"
+            && matches!(self.peek_kind(), TokenKind::Identifier(value) if value == "at" || value == "when")
+        {
+            self.advance();
+            while !matches!(
+                self.peek_kind(),
+                TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Eof
+            ) {
+                self.advance();
+            }
+            force_implicit_name = true;
+            Some("AcceptActionUsage".to_string())
+        } else if keyword == "accept"
+            && matches!(self.peek_kind(), TokenKind::Identifier(_))
+            && matches!(self.next_kind(), Some(TokenKind::Identifier(value)) if value == "after")
+        {
+            let payload_name = self.expect_identifier("expected accept payload name")?;
+            synthetic_body_members.push(synthetic_reference_usage(
+                &payload_name,
+                None,
+                None,
+                &["payload", "in"],
+                &start.span,
+            ));
+            self.expect_identifier_named("after", "expected `after` after accept payload")?;
+            while !matches!(
+                self.peek_kind(),
+                TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Eof
+            ) {
+                self.advance();
+            }
+            force_implicit_name = true;
+            Some("AcceptActionUsage".to_string())
+        } else if keyword == "accept"
+            && matches!(self.peek_kind(), TokenKind::Identifier(_))
+            && matches!(self.next_kind(), Some(TokenKind::Colon))
+        {
+            let payload_name = self.expect_identifier("expected accept payload name")?;
+            self.expect(TokenKind::Colon, "expected `:` after accept payload name")?;
+            let payload_type = self.parse_qualified_name()?;
+            synthetic_body_members.push(synthetic_reference_usage(
+                &payload_name,
+                Some(payload_type),
+                None,
+                &["payload", "in"],
+                &start.span,
+            ));
+            force_implicit_name = true;
+            Some("AcceptActionUsage".to_string())
+        } else if keyword == "accept"
             && matches!(self.peek_kind(), TokenKind::Identifier(_))
         {
             let payload = self.parse_qualified_name()?;
@@ -1284,6 +1355,19 @@ impl Parser {
             && matches!(self.peek_kind(), TokenKind::Identifier(value) if value == "flow")
         {
             self.expect_identifier_named("flow", "expected `flow` after `succession`")?;
+            let explicit_flow_name =
+                if matches!(self.peek_kind(), TokenKind::Identifier(_))
+                    && matches!(self.next_kind(), Some(TokenKind::Identifier(value)) if value == "from")
+                {
+                    let name = self.expect_identifier("expected succession flow name")?;
+                    self.expect_identifier_named("from", "expected `from` after succession flow name")?;
+                    Some(name)
+                } else {
+                    None
+                };
+            if matches!(self.peek_kind(), TokenKind::Identifier(value) if value == "from") {
+                self.expect_identifier_named("from", "expected `from` before succession flow source")?;
+            }
             let source = self.parse_qualified_name()?;
             self.expect_identifier_named("to", "expected `to` between succession flow ends")?;
             let target = self.parse_qualified_name()?;
@@ -1312,7 +1396,7 @@ impl Parser {
                 &start.span,
             ));
             force_implicit_name = true;
-            Some("SuccessionFlowUsage".to_string())
+            explicit_flow_name.or_else(|| Some("SuccessionFlowUsage".to_string()))
         } else if keyword == "perform"
             && matches!(self.peek_kind(), TokenKind::Identifier(value) if value == "action")
         {
@@ -1388,6 +1472,13 @@ impl Parser {
                 &["payload", "in"],
                 &start.span,
             ));
+        }
+        if keyword == "action"
+            && explicit_name.is_some()
+            && matches!(self.peek_kind(), TokenKind::Identifier(value) if value == "send")
+        {
+            self.expect_identifier_named("send", "expected `send` after action name")?;
+            effective_keyword = "send".to_string();
         }
         let is_implicit_name = explicit_name.is_none() || force_implicit_name;
         let mut tail = if keyword == "connect" {
@@ -2041,7 +2132,13 @@ impl Parser {
                 TokenKind::Identifier(value) if value == "as" => {
                     self.expect_identifier_named("as", "expected `as` in cast expression")?;
                     if matches!(self.peek_kind(), TokenKind::Identifier(_)) {
-                        self.parse_qualified_name()?;
+                        let ty = self.parse_qualified_name()?;
+                        let span = merge_span(&expr_span(&expr), &ty.span);
+                        expr = Expr::Call {
+                            function: format!("as {}", ty.as_dot_string()),
+                            args: vec![expr],
+                            span,
+                        };
                     } else {
                         return Err(self.error_here("expected type name after `as`"));
                     }
@@ -2166,10 +2263,13 @@ impl Parser {
             self.expect_identifier_named("connect", "expected `connect`")?;
             if matches!(self.peek_kind(), TokenKind::LParen) {
                 self.consume_balanced(TokenKind::LParen, TokenKind::RParen)?;
+                if matches!(self.peek_kind(), TokenKind::LBrace) {
+                    tail.had_body = true;
+                    tail.body_members.extend(self.parse_declaration_block()?);
+                }
                 return Ok(());
             }
-            let has_named_ends = matches!(self.peek_kind(), TokenKind::Identifier(_))
-                && matches!(self.next_kind(), Some(TokenKind::Identifier(value)) if value == "references");
+            let has_named_ends = self.starts_named_connection_end_member();
             tail.body_members = self.parse_connection_end_member_pair(has_named_ends)?;
             if matches!(self.peek_kind(), TokenKind::LBrace) {
                 tail.had_body = true;
@@ -2185,6 +2285,10 @@ impl Parser {
         if starts_anonymous_connect {
             if matches!(self.peek_kind(), TokenKind::LParen) {
                 self.consume_balanced(TokenKind::LParen, TokenKind::RParen)?;
+                if matches!(self.peek_kind(), TokenKind::LBrace) {
+                    tail.had_body = true;
+                    tail.body_members.extend(self.parse_declaration_block()?);
+                }
                 return Ok(());
             }
             tail.body_members = self.parse_connection_end_member_pair(false)?;
@@ -2220,7 +2324,9 @@ impl Parser {
             fallback_name.to_string()
         };
 
-        let reference_target = if matches!(self.peek_kind(), TokenKind::Identifier(value) if value == "references")
+        let reference_target = if named_end && self.consume_connection_end_reference_arrow() {
+            self.parse_qualified_name()?
+        } else if matches!(self.peek_kind(), TokenKind::Identifier(value) if value == "references")
         {
             self.expect_identifier_named(
                 "references",
@@ -2329,7 +2435,7 @@ impl Parser {
                 Some(TokenKind::Identifier(_))
             ),
             Some(TokenKind::Identifier(value)) => {
-                if value == "new" {
+                if matches!(value.as_str(), "if" | "else" | "new") {
                     return false;
                 }
                 let next_kind = self.tokens.get(index + 1).map(|token| &token.kind);
@@ -2551,6 +2657,64 @@ impl Parser {
             self.pending_docs.push(text);
             self.advance();
         }
+    }
+
+    fn starts_connection_end_reference_arrow(&self, offset: usize) -> bool {
+        match self.tokens.get(self.index + offset).map(|token| &token.kind) {
+            Some(TokenKind::Specializes) => true,
+            Some(TokenKind::ScopeSep) => matches!(
+                self.tokens.get(self.index + offset + 1).map(|token| &token.kind),
+                Some(TokenKind::RAngle)
+            ),
+            _ => false,
+        }
+    }
+
+    fn starts_named_connection_end_member(&self) -> bool {
+        let mut offset = 0;
+        if matches!(self.peek_kind(), TokenKind::LBracket) {
+            let mut depth = 0usize;
+            while let Some(token) = self.tokens.get(self.index + offset) {
+                match token.kind {
+                    TokenKind::LBracket => depth += 1,
+                    TokenKind::RBracket => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            offset += 1;
+                            break;
+                        }
+                    }
+                    TokenKind::Eof => return false,
+                    _ => {}
+                }
+                offset += 1;
+            }
+        }
+        if !matches!(
+            self.tokens.get(self.index + offset).map(|token| &token.kind),
+            Some(TokenKind::Identifier(_))
+        ) {
+            return false;
+        }
+        matches!(
+            self.tokens.get(self.index + offset + 1).map(|token| &token.kind),
+            Some(TokenKind::Identifier(value)) if value == "references"
+        ) || self.starts_connection_end_reference_arrow(offset + 1)
+    }
+
+    fn consume_connection_end_reference_arrow(&mut self) -> bool {
+        if matches!(self.peek_kind(), TokenKind::Specializes) {
+            self.advance();
+            return true;
+        }
+        if matches!(self.peek_kind(), TokenKind::ScopeSep)
+            && matches!(self.next_kind(), Some(TokenKind::RAngle))
+        {
+            self.advance();
+            self.advance();
+            return true;
+        }
+        false
     }
 
     fn should_parse_as_feature_keyword(&self, keyword: &str) -> bool {
@@ -2940,7 +3104,7 @@ mod tests {
         load_sysml_document, parse_sysml, parse_sysml_recovering,
     };
     use crate::frontend::ast::{Declaration, Expr};
-    use crate::frontend::resolver::resolve_module;
+    use crate::frontend::resolver::{resolve_module, resolve_module_with_context};
     use crate::frontend::transpile::{MappingBundle, transpile_module};
     use crate::ir::{KirDocument, load_model_stack};
     use crate::runtime::Runtime;
@@ -3091,6 +3255,50 @@ mod tests {
     }
 
     #[test]
+    fn named_assert_constraint_usages_emit_distinct_ids() {
+        let module = parse_sysml(
+            "package Demo { part def Vehicle { assert constraint massBalance { totalMass == dryMass + fuelMass } assert constraint maxMassCheck { totalMass <= maxMass } } }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+        let kir = transpile_module(&resolved, "inline.sysml", &mappings).unwrap();
+
+        assert!(
+            kir.elements
+                .iter()
+                .any(|element| element.id == "assert.Demo.Vehicle.massBalance")
+        );
+        assert!(
+            kir.elements
+                .iter()
+                .any(|element| element.id == "assert.Demo.Vehicle.maxMassCheck")
+        );
+    }
+
+    #[test]
+    fn anonymous_assert_constraint_usages_are_source_disambiguated() {
+        let module = parse_sysml(
+            "package Demo { part def Vehicle { assert constraint { totalMass == dryMass + fuelMass } assert constraint { totalMass <= maxMass } } }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+        let kir = transpile_module(&resolved, "inline.sysml", &mappings).unwrap();
+        let assert_ids = kir
+            .elements
+            .iter()
+            .filter(|element| element.id.starts_with("assert.Demo.Vehicle."))
+            .map(|element| element.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(assert_ids.len(), 2);
+        assert_ne!(assert_ids[0], assert_ids[1]);
+    }
+
+    #[test]
     fn parses_visibility_wildcard_imports_and_quoted_package_names() {
         let module = parse_sysml(
             "package 'Package Example' { public import ScalarValues::*; private part def Automobile; }",
@@ -3171,6 +3379,19 @@ mod tests {
 
         assert!(kir.elements.iter().any(|element| {
             element.id == "type.Demo.SemanticThing" && element.kind == "KerML::Core::Type"
+        }));
+    }
+
+    #[test]
+    fn transpiles_custom_profile_definition_as_classifier() {
+        let module = parse_sysml("package Demo { service def APISService; }").unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+        let kir = transpile_module(&resolved, "inline.sysml", &mappings).unwrap();
+
+        assert!(kir.elements.iter().any(|element| {
+            element.id == "type.Demo.APISService" && element.kind == "KerML::Core::Type"
         }));
     }
 
@@ -4098,6 +4319,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_interface_connect_named_ends_with_specialization_arrow() {
+        let module = parse_sysml(
+            "package Demo { interface drive connect transDrive ::> transmission.drive to axleDrive ::> axle.drive { flow f from transDrive.torque to axleDrive.torque; } }",
+        )
+        .unwrap();
+        let package = module.package.unwrap();
+        assert!(matches!(
+            &package.members[0],
+            Declaration::GenericUsage(usage)
+                if usage.keyword == "interface" && usage.body_members.len() == 3
+        ));
+    }
+
+    #[test]
     fn parses_nary_connection_tuple_connect_form() {
         let module = parse_sysml(
             "package Demo { part d1; part d2; part d3; connection bus : C connect (d1, d2, d3); }",
@@ -4105,6 +4340,202 @@ mod tests {
         .unwrap();
         let package = module.package.unwrap();
         assert_eq!(package.members.len(), 4);
+    }
+
+    #[test]
+    fn parses_interface_tuple_connect_form_with_body() {
+        let module = parse_sysml(
+            "package Demo { interface i : Interfaces::Interface connect (a ::> A.p, b ::> B.p) { flow f from a.out to b.in; } }",
+        )
+        .unwrap();
+        let package = module.package.unwrap();
+        assert!(matches!(
+            &package.members[0],
+            Declaration::GenericUsage(usage)
+                if usage.keyword == "interface" && usage.body_members.len() == 1
+        ));
+    }
+
+    #[test]
+    fn parses_named_succession_flow_with_from_clause() {
+        let module = parse_sysml(
+            "package Demo { action illuminate { action send { out x; } action receive { in x; } succession flow xFlow from send.x to receive.x; } }",
+        )
+        .unwrap();
+        let package = module.package.unwrap();
+        let action = match &package.members[0] {
+            Declaration::GenericUsage(usage) => usage,
+            other => panic!("expected action usage, got {other:?}"),
+        };
+        assert!(matches!(
+            &action.body_members[2],
+            Declaration::GenericUsage(usage)
+                if usage.keyword == "succession" && usage.name == "xFlow"
+        ));
+    }
+
+    #[test]
+    fn parses_constraint_body_with_opaque_if_else_expression() {
+        let module = parse_sysml(
+            "package Demo { part p { assert constraint { if flag? p istype A else p istype B } } }",
+        )
+        .unwrap();
+        let package = module.package.unwrap();
+        let part = match &package.members[0] {
+            Declaration::PartUsage(usage) => usage,
+            other => panic!("expected part usage, got {other:?}"),
+        };
+        let constraint = match &part.body_members[0] {
+            Declaration::GenericUsage(usage) => usage,
+            other => panic!("expected constraint usage, got {other:?}"),
+        };
+        assert_eq!(constraint.keyword, "assert");
+        assert!(constraint.body_members.is_empty());
+    }
+
+    #[test]
+    fn parses_accept_payload_name_and_type() {
+        let module =
+            parse_sysml("package Demo { state s { accept rs:ResultGiveItems then Wait; } }")
+                .unwrap();
+        let package = module.package.unwrap();
+        let state = match &package.members[0] {
+            Declaration::GenericUsage(usage) => usage,
+            other => panic!("expected state usage, got {other:?}"),
+        };
+        let accept = match &state.body_members[0] {
+            Declaration::GenericUsage(usage) => usage,
+            other => panic!("expected accept usage, got {other:?}"),
+        };
+        assert_eq!(accept.keyword, "accept");
+        assert!(matches!(
+            &accept.body_members[0],
+            Declaration::GenericUsage(payload)
+                if payload.name == "rs"
+                    && payload.ty.as_ref().map(|ty| ty.as_dot_string()).as_deref()
+                        == Some("ResultGiveItems")
+        ));
+    }
+
+    #[test]
+    fn parses_accept_after_when_and_at_forms_without_payload_type_lookup() {
+        let module = parse_sysml(
+            "package Demo { action a { accept sig after 10[SI::s]; accept when b.f; accept at new Time::Iso8601DateTime(\"2022-01-30T01:00:00Z\"); } }",
+        )
+        .unwrap();
+        let package = module.package.unwrap();
+        let action = match &package.members[0] {
+            Declaration::GenericUsage(usage) => usage,
+            other => panic!("expected action usage, got {other:?}"),
+        };
+
+        assert_eq!(action.body_members.len(), 3);
+        assert!(action.body_members.iter().all(|member| matches!(
+            member,
+            Declaration::GenericUsage(usage) if usage.keyword == "accept"
+        )));
+    }
+
+    #[test]
+    fn parses_named_action_send_as_send_usage() {
+        let module =
+            parse_sysml("package Demo { action a { action snd send { in :>> payload = s; } } }")
+                .unwrap();
+        let package = module.package.unwrap();
+        let action = match &package.members[0] {
+            Declaration::GenericUsage(usage) => usage,
+            other => panic!("expected action usage, got {other:?}"),
+        };
+
+        assert!(matches!(
+            &action.body_members[0],
+            Declaration::GenericUsage(usage) if usage.keyword == "send" && usage.name == "snd"
+        ));
+    }
+
+    #[test]
+    fn resolves_send_payload_redefinition_against_send_action() {
+        let module =
+            parse_sysml("package Demo { action a { in s; action snd send { in :>> payload = s; } } }")
+                .unwrap();
+        let stdlib = fake_stdlib(["Actions::SendAction", "Actions::SendAction::payload"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let snd = find_resolved_usage(&resolved.usages, "Demo.a")
+            .and_then(|action| action.members.iter().find(|member| member.declared_name == "snd"))
+            .unwrap();
+        let payload = snd
+            .members
+            .iter()
+            .find(|member| member.declared_name == "in")
+            .unwrap();
+        assert_eq!(
+            payload.redefined_features,
+            vec!["feature.Actions::SendAction::payload".to_string()]
+        );
+    }
+
+    #[test]
+    fn analysis_case_definition_inherits_case_result_feature() {
+        let module = parse_sysml(
+            "package Demo { analysis def AnalysisCase { objective obj { subject = result; } } }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib([
+            "AnalysisCases::AnalysisCase",
+            "Cases::Case",
+            "Cases::Case::result",
+            "AnalysisCases::AnalysisCase::result",
+            "OtherFunctions::f::result",
+        ]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let objective = resolved
+            .definitions
+            .iter()
+            .find(|definition| definition.qualified_name == "Demo.AnalysisCase")
+            .and_then(|definition| {
+                definition
+                    .members
+                    .iter()
+                    .find(|member| member.declared_name == "obj")
+            })
+            .unwrap();
+        let subject = objective
+            .members
+            .iter()
+            .find(|member| member.declared_name == "subject")
+            .unwrap();
+        assert_eq!(
+            subject.expression,
+            Some(crate::frontend::resolver::ResolvedExpr::FeaturePath {
+                segments: vec![crate::frontend::resolver::ResolvedPathSegment {
+                    name: "result".to_string(),
+                    feature_id: "feature.AnalysisCases::AnalysisCase::result".to_string(),
+                }]
+            })
+        );
+    }
+
+    #[test]
+    fn expression_path_resolves_instance_member_then_member_type_feature() {
+        let module = parse_sysml(
+            "package Demo { part def VehiclePart { attribute m; } part def Vehicle; part vehicle : Vehicle { part eng : VehiclePart; } calc ms { in partMasses = (vehicle.eng.m); } }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let calc = find_resolved_usage(&resolved.usages, "Demo.ms").unwrap();
+        let input = calc
+            .members
+            .iter()
+            .find(|member| member.declared_name == "partMasses")
+            .unwrap();
+        assert!(input.expression.is_some());
     }
 
     #[test]
@@ -4124,6 +4555,27 @@ mod tests {
                 .unwrap();
         let package = module.package.unwrap();
         assert_eq!(package.members.len(), 3);
+    }
+
+    #[test]
+    fn parses_profiled_arbitrary_keyword_usage_name_before_specialization() {
+        let module =
+            parse_sysml("package Demo { #profiled concreteThing :> Base { #nested child; } }")
+                .unwrap();
+        let package = module.package.unwrap();
+        let usage = match &package.members[0] {
+            Declaration::GenericUsage(usage) => usage,
+            other => panic!("expected profiled usage, got {other:?}"),
+        };
+
+        assert_eq!(usage.keyword, "profiled");
+        assert_eq!(usage.name, "concreteThing");
+        assert_eq!(usage.specializes[0].as_dot_string(), "Base");
+        assert!(matches!(
+            &usage.body_members[0],
+            Declaration::GenericUsage(child)
+                if child.keyword == "nested" && child.name == "child"
+        ));
     }
 
     #[test]
@@ -4277,6 +4729,85 @@ mod tests {
     }
 
     #[test]
+    fn resolves_wildcard_imported_profiled_usage_in_expression() {
+        let producer = parse_sysml("package Producer { #profiled produced; }").unwrap();
+        let consumer =
+            parse_sysml("package Consumer { private import Producer::*; part copy = produced; }")
+                .unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module_with_context(
+            &consumer,
+            &[producer, consumer.clone()],
+            &stdlib,
+            &mappings,
+        )
+        .unwrap();
+
+        let copy = find_resolved_usage(&resolved.usages, "Consumer.copy").unwrap();
+        assert_eq!(
+            copy.expression,
+            Some(crate::frontend::resolver::ResolvedExpr::FeaturePath {
+                segments: vec![crate::frontend::resolver::ResolvedPathSegment {
+                    name: "produced".to_string(),
+                    feature_id: "feature.Producer.produced".to_string(),
+                }]
+            })
+        );
+    }
+
+    #[test]
+    fn redefinition_suffix_lookup_ignores_current_feature() {
+        let module = parse_sysml(
+            "package Demo { part def Base { attribute label; } part other { attribute label; } part def Derived { attribute :>> label = \"x\"; } }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let label = resolved
+            .definitions
+            .iter()
+            .find(|definition| definition.qualified_name == "Demo.Derived")
+            .and_then(|definition| {
+                definition
+                    .members
+                    .iter()
+                    .find(|member| member.qualified_name == "Demo.Derived.label")
+            })
+            .unwrap();
+        assert_eq!(
+            label.redefined_features,
+            vec!["feature.Demo.Base.label".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolves_conjugated_type_reference_by_unconjugated_name() {
+        let module = parse_sysml(
+            "package Demo { port def ServiceDiscoveryDD; part consumer { port serviceDiscovery : ~ServiceDiscoveryDD; } }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let service_discovery = find_resolved_usage(&resolved.usages, "Demo.consumer")
+            .and_then(|consumer| {
+                consumer
+                    .members
+                    .iter()
+                    .find(|member| member.declared_name == "serviceDiscovery")
+            })
+            .unwrap();
+        assert_eq!(
+            service_discovery.type_ref.as_deref(),
+            Some("type.Demo.ServiceDiscoveryDD")
+        );
+    }
+
+    #[test]
     fn resolves_relative_qualified_type_in_owner_package() {
         let module =
             parse_sysml("package Demo { package P1 { part def A; } part x : P1::A; }").unwrap();
@@ -4286,6 +4817,59 @@ mod tests {
 
         let x = find_resolved_usage(&resolved.usages, "Demo.x").unwrap();
         assert_eq!(x.type_ref.as_deref(), Some("type.Demo.P1.A"));
+    }
+
+    #[test]
+    fn resolves_imported_alias_name_as_type() {
+        let module = parse_sysml(
+            "package AliasImport { package Definitions { part def Vehicle; alias Car for Vehicle; } package Usages { private import Definitions::Car; part vehicle : Car; } }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let vehicle = find_resolved_usage(&resolved.usages, "AliasImport.Usages.vehicle").unwrap();
+        assert_eq!(
+            vehicle.type_ref.as_deref(),
+            Some("type.AliasImport.Definitions.Vehicle")
+        );
+    }
+
+    #[test]
+    fn resolves_stdlib_breadth_alias_import() {
+        let module = parse_sysml(
+            "package AliasTest { private import ISQSpaceTime::breadth; attribute b :> breadth; }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib(["ISQSpaceTime::width"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let b = find_resolved_usage(&resolved.usages, "AliasTest.b").unwrap();
+        assert_eq!(b.specializes, vec!["ISQSpaceTime::width".to_string()]);
+    }
+
+    #[test]
+    fn resolves_nested_feature_alias_for_redefinition() {
+        let module = parse_sysml(
+            "package AliasTest { part def P1 { port porig1; alias po1 for porig1; } part p1 : P1 { port po1 :>> po1; } }",
+        )
+        .unwrap();
+        let stdlib = fake_stdlib(["SysML::Systems::PartDefinition"]);
+        let mappings = MappingBundle::load().unwrap();
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let p1 = find_resolved_usage(&resolved.usages, "AliasTest.p1").unwrap();
+        let po1 = p1
+            .members
+            .iter()
+            .find(|member| member.declared_name == "po1")
+            .unwrap();
+        assert_eq!(
+            po1.redefined_features,
+            vec!["feature.AliasTest.P1.porig1".to_string()]
+        );
     }
 
     #[test]
@@ -4659,6 +5243,66 @@ mod tests {
 
         assert_eq!(report.status, SemanticCompileStatus::Ok);
         assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn semantic_compile_allows_usage_typed_part_collections() {
+        let stdlib = KirDocument::from_path(&crate::paths::default_stdlib_path()).unwrap();
+        let report = compile_sysml_text_with_context_report(
+            "package ConstraintSmokeTest {
+                constraint def MassBalance {
+                    in totalMass;
+                    in dryMass;
+                    in fuelMass;
+                    in payloadMass;
+
+                    totalMass == dryMass + fuelMass + payloadMass
+                }
+
+                constraint def MaxMassCheck {
+                    in totalMass;
+                    in maxMass;
+
+                    totalMass <= maxMass
+                }
+
+                part testVehicle {
+                    attribute dryMass = 900;
+                    attribute fuelMass = 120;
+                    attribute payloadMass = 180;
+                    attribute maxMass = 1250;
+                    attribute totalMass = dryMass + fuelMass + payloadMass;
+                    attribute grossWeight = totalMass * 9.81;
+
+                    assert constraint massBalance : MassBalance {
+                        in totalMass = totalMass;
+                        in dryMass = dryMass;
+                        in fuelMass = fuelMass;
+                        in payloadMass = payloadMass;
+                    }
+
+                    assert constraint maxMassCheck : MaxMassCheck {
+                        in totalMass = totalMass;
+                        in maxMass = maxMass;
+                    }
+                }
+
+                part compositeVehicle {
+                    part components : testVehicle[*];
+                    attribute totalMass default 100 + sum(components.totalMass);
+                }
+            }",
+            "inline.sysml",
+            &[],
+            &stdlib,
+        );
+
+        assert_eq!(report.status, SemanticCompileStatus::Ok);
+        assert!(report.diagnostics.is_empty());
+        let document = report.document.unwrap();
+        assert!(document.elements.iter().any(|element| {
+            element.id == "feature.ConstraintSmokeTest.compositeVehicle.components"
+        }));
     }
 
     #[test]

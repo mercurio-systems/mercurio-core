@@ -506,6 +506,12 @@ fn collect_module(
         &mut aliases,
         mappings,
     )?;
+    collect_nested_aliases(
+        &root_members,
+        &[],
+        None,
+        &mut aliases,
+    );
 
     Ok((packages, imports, definitions, usages, aliases))
 }
@@ -571,6 +577,8 @@ fn collect_declarations(
                 decl: import_decl.clone(),
             }),
             Declaration::PartDefinition(definition) => {
+                let qualified_segments =
+                    qualify_segments(owner_package_segments, &[definition.name.clone()]);
                 definitions.push(collect_part_definition(
                     definition,
                     owner_package_segments,
@@ -578,13 +586,18 @@ fn collect_declarations(
                 )?);
                 collect_nested_owned_definitions(
                     &definition.members,
-                    &qualify_segments(owner_package_segments, &[definition.name.clone()]),
+                    &qualified_segments,
                     definitions,
                     mappings,
                 )?;
+                collect_nested_member_imports(
+                    &definition.members,
+                    &qualified_segments.join("."),
+                    imports,
+                );
                 collect_nested_owned_packages(
                     &definition.members,
-                    &qualify_segments(owner_package_segments, &[definition.name.clone()]),
+                    &qualified_segments,
                     packages,
                     imports,
                     definitions,
@@ -594,6 +607,8 @@ fn collect_declarations(
                 )?;
             }
             Declaration::GenericDefinition(definition) => {
+                let qualified_segments =
+                    qualify_segments(owner_package_segments, &[definition.name.clone()]);
                 definitions.push(collect_generic_definition(
                     definition,
                     owner_package_segments,
@@ -601,13 +616,18 @@ fn collect_declarations(
                 )?);
                 collect_nested_owned_definitions(
                     &definition.members,
-                    &qualify_segments(owner_package_segments, &[definition.name.clone()]),
+                    &qualified_segments,
                     definitions,
                     mappings,
                 )?;
+                collect_nested_member_imports(
+                    &definition.members,
+                    &qualified_segments.join("."),
+                    imports,
+                );
                 collect_nested_owned_packages(
                     &definition.members,
-                    &qualify_segments(owner_package_segments, &[definition.name.clone()]),
+                    &qualified_segments,
                     packages,
                     imports,
                     definitions,
@@ -616,18 +636,18 @@ fn collect_declarations(
                     mappings,
                 )?;
             }
-            Declaration::PartUsage(usage) => usages.push(collect_part_usage(
-                usage,
-                owner_package_qualified_name.unwrap_or("root"),
-                "Package",
-                mappings,
-            )),
-            Declaration::GenericUsage(usage) => usages.push(collect_generic_usage(
-                usage,
-                owner_package_qualified_name.unwrap_or("root"),
-                "Package",
-                mappings,
-            )),
+            Declaration::PartUsage(usage) => {
+                let owner = owner_package_qualified_name.unwrap_or("root");
+                usages.push(collect_part_usage(usage, owner, "Package", mappings));
+                let qualified_name = usage_qualified_name(owner, &usage.name);
+                collect_nested_member_imports(&usage.body_members, &qualified_name, imports);
+            }
+            Declaration::GenericUsage(usage) => {
+                let owner = owner_package_qualified_name.unwrap_or("root");
+                usages.push(collect_generic_usage(usage, owner, "Package", mappings));
+                let qualified_name = usage_qualified_name(owner, &usage.name);
+                collect_nested_member_imports(&usage.body_members, &qualified_name, imports);
+            }
             Declaration::Alias(alias) => aliases.push(collect_alias(alias, owner_package_segments)),
         }
     }
@@ -704,6 +724,43 @@ fn collect_nested_owned_definitions(
     }
 
     Ok(())
+}
+
+fn collect_nested_member_imports(
+    declarations: &[Declaration],
+    owner_qualified_name: &str,
+    imports: &mut Vec<CollectedImport>,
+) {
+    for declaration in declarations {
+        match declaration {
+            Declaration::Import(import_decl) => imports.push(CollectedImport {
+                owner_package_qualified_name: Some(owner_qualified_name.to_string()),
+                decl: import_decl.clone(),
+            }),
+            Declaration::PartUsage(usage) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &usage.name);
+                collect_nested_member_imports(&usage.body_members, &qualified_name, imports);
+            }
+            Declaration::GenericUsage(usage) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &usage.name);
+                collect_nested_member_imports(&usage.body_members, &qualified_name, imports);
+            }
+            Declaration::PartDefinition(definition) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &definition.name);
+                collect_nested_member_imports(&definition.members, &qualified_name, imports);
+            }
+            Declaration::GenericDefinition(definition) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &definition.name);
+                collect_nested_member_imports(&definition.members, &qualified_name, imports);
+            }
+            Declaration::Package(package) => {
+                let qualified_name =
+                    usage_qualified_name(owner_qualified_name, &package.name.as_dot_string());
+                collect_nested_member_imports(&package.members, &qualified_name, imports);
+            }
+            Declaration::Alias(_) => {}
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -988,10 +1045,113 @@ fn annotate_connection_definition_members(
 }
 
 fn collect_alias(alias: &AliasDecl, owner_package_segments: &[String]) -> CollectedAlias {
+    let target = if alias.target.segments.len() == 1 && !owner_package_segments.is_empty() {
+        QualifiedName {
+            segments: qualify_segments(owner_package_segments, &alias.target.segments),
+            span: alias.target.span.clone(),
+        }
+    } else {
+        alias.target.clone()
+    };
     CollectedAlias {
         qualified_name: qualify_name(owner_package_segments, &alias.name),
         declared_name: alias.name.clone(),
-        target: alias.target.clone(),
+        target,
+    }
+}
+
+fn collect_alias_in_owner(alias: &AliasDecl, owner_qualified_name: &str) -> CollectedAlias {
+    let target = if alias.target.segments.len() == 1 && owner_qualified_name != "root" {
+        let mut segments = owner_qualified_name
+            .split('.')
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        segments.extend(alias.target.segments.clone());
+        QualifiedName {
+            segments,
+            span: alias.target.span.clone(),
+        }
+    } else {
+        alias.target.clone()
+    };
+    CollectedAlias {
+        qualified_name: usage_qualified_name(owner_qualified_name, &alias.name),
+        declared_name: alias.name.clone(),
+        target,
+    }
+}
+
+fn collect_nested_aliases(
+    declarations: &[Declaration],
+    owner_package_segments: &[String],
+    owner_qualified_name: Option<&str>,
+    aliases: &mut Vec<CollectedAlias>,
+) {
+    for declaration in declarations {
+        match declaration {
+            Declaration::Package(package) => {
+                let package_segments = qualify_segments(owner_package_segments, &package.name.segments);
+                let package_qualified_name = package_segments.join(".");
+                collect_nested_aliases(
+                    &package.members,
+                    &package_segments,
+                    Some(&package_qualified_name),
+                    aliases,
+                );
+            }
+            Declaration::PartDefinition(definition) => {
+                let qualified_name = qualify_name(owner_package_segments, &definition.name);
+                collect_nested_member_aliases(&definition.members, &qualified_name, aliases);
+            }
+            Declaration::GenericDefinition(definition) => {
+                let qualified_name = qualify_name(owner_package_segments, &definition.name);
+                collect_nested_member_aliases(&definition.members, &qualified_name, aliases);
+            }
+            Declaration::PartUsage(usage) => {
+                let qualified_name =
+                    usage_qualified_name(owner_qualified_name.unwrap_or("root"), &usage.name);
+                collect_nested_member_aliases(&usage.body_members, &qualified_name, aliases);
+            }
+            Declaration::GenericUsage(usage) => {
+                let qualified_name =
+                    usage_qualified_name(owner_qualified_name.unwrap_or("root"), &usage.name);
+                collect_nested_member_aliases(&usage.body_members, &qualified_name, aliases);
+            }
+            Declaration::Import(_) | Declaration::Alias(_) => {}
+        }
+    }
+}
+
+fn collect_nested_member_aliases(
+    declarations: &[Declaration],
+    owner_qualified_name: &str,
+    aliases: &mut Vec<CollectedAlias>,
+) {
+    for declaration in declarations {
+        match declaration {
+            Declaration::Alias(alias) => aliases.push(collect_alias_in_owner(alias, owner_qualified_name)),
+            Declaration::PartUsage(usage) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &usage.name);
+                collect_nested_member_aliases(&usage.body_members, &qualified_name, aliases);
+            }
+            Declaration::GenericUsage(usage) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &usage.name);
+                collect_nested_member_aliases(&usage.body_members, &qualified_name, aliases);
+            }
+            Declaration::PartDefinition(definition) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &definition.name);
+                collect_nested_member_aliases(&definition.members, &qualified_name, aliases);
+            }
+            Declaration::GenericDefinition(definition) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &definition.name);
+                collect_nested_member_aliases(&definition.members, &qualified_name, aliases);
+            }
+            Declaration::Package(package) => {
+                let qualified_name = usage_qualified_name(owner_qualified_name, &package.name.as_dot_string());
+                collect_nested_member_aliases(&package.members, &qualified_name, aliases);
+            }
+            Declaration::Import(_) => {}
+        }
     }
 }
 
@@ -1615,9 +1775,10 @@ fn resolve_usage(
             )
         })
         .transpose()?;
+    let mut specialized_features = Vec::new();
     let mut type_ref = match &usage.ty {
-        Some(name) => Some(unresolved_or_error(
-            resolve_type_reference_in_scope(
+        Some(name) => {
+            if let Some(target) = resolve_type_reference_in_scope(
                 name,
                 &usage.owner_qualified_name,
                 stdlib_ids,
@@ -1625,11 +1786,27 @@ fn resolve_usage(
                 local_definitions,
                 local_aliases,
                 import_aliases,
-            ),
-            name,
-            "type",
-            policy,
-        )?),
+            ) {
+                Some(target)
+            } else if let Some(target) = resolve_feature_reference(
+                &usage,
+                name,
+                stdlib_ids,
+                stdlib_feature_index,
+                stdlib_aliases,
+                local_definitions,
+                local_aliases,
+                import_aliases,
+                definition_index,
+                local_feature_index,
+                local_usage_map,
+            ) {
+                specialized_features.push(target);
+                None
+            } else {
+                Some(unresolved_or_error(None, name, "type", policy)?)
+            }
+        }
         None => None,
     };
     let reference_target = effective_reference_target
@@ -1689,7 +1866,6 @@ fn resolve_usage(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let mut specializes = Vec::new();
-    let mut specialized_features = Vec::new();
     for name in &usage.specializes {
         if let Some(target) = resolve_feature_reference(
             &usage,
@@ -2246,8 +2422,8 @@ fn resolve_expression_path(
     })?;
 
     let mut bound_segments = Vec::new();
-    let mut current_feature_id = match root {
-        ExpressionPathRoot::SelfRef => None,
+    let (mut current_feature_id, mut current_type_id) = match root {
+        ExpressionPathRoot::SelfRef => (None, None),
         ExpressionPathRoot::Name(name) => {
             let feature_id = resolve_feature_reference(
                 usage,
@@ -2277,12 +2453,68 @@ fn resolve_expression_path(
                 name: first_name,
                 feature_id: feature_id.clone(),
             });
-            Some(feature_id)
+            (Some(feature_id), None)
+        }
+        ExpressionPathRoot::CastType(name) => {
+            let type_id = resolve_type_reference(
+                &name,
+                stdlib_ids,
+                stdlib_aliases,
+                local_definitions,
+                local_aliases,
+                import_aliases,
+            )
+            .or_else(|| {
+                resolve_feature_reference(
+                    usage,
+                    &name,
+                    stdlib_ids,
+                    stdlib_feature_index,
+                    stdlib_aliases,
+                    local_definitions,
+                    local_aliases,
+                    import_aliases,
+                    definition_index,
+                    local_feature_index,
+                    local_usage_map,
+                )
+                .and_then(|feature_id| {
+                    infer_usage_type_from_feature_id(
+                        &feature_id,
+                        stdlib_ids,
+                        stdlib_aliases,
+                        local_definitions,
+                        local_aliases,
+                        import_aliases,
+                        local_usage_map,
+                    )
+                })
+            })
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    format!("unresolved expression cast type `{}`", name.as_colon_string()),
+                    Some(name.span.clone()),
+                )
+            })?;
+            (None, Some(type_id))
         }
     };
 
     for segment in segments {
-        let feature_id = if let Some(current_feature_id) = &current_feature_id {
+        let feature_id = if let Some(current_type_id) = &current_type_id {
+            resolve_feature_reference_from_type_id(
+                current_type_id,
+                &segment,
+                stdlib_ids,
+                stdlib_feature_index,
+                stdlib_aliases,
+                local_definitions,
+                local_aliases,
+                import_aliases,
+                definition_index,
+                local_feature_index,
+            )
+        } else if let Some(current_feature_id) = &current_feature_id {
             resolve_feature_reference_from_feature_type(
                 current_feature_id,
                 &segment,
@@ -2327,6 +2559,7 @@ fn resolve_expression_path(
             feature_id: feature_id.clone(),
         });
         current_feature_id = Some(feature_id);
+        current_type_id = None;
     }
 
     Ok(ResolvedExpr::FeaturePath {
@@ -2338,6 +2571,7 @@ fn resolve_expression_path(
 enum ExpressionPathRoot {
     SelfRef,
     Name(QualifiedName),
+    CastType(QualifiedName),
 }
 
 fn flatten_expression_path(expr: &Expr) -> Option<(ExpressionPathRoot, Vec<String>, SourceSpan)> {
@@ -2356,6 +2590,26 @@ fn flatten_expression_path(expr: &Expr) -> Option<(ExpressionPathRoot, Vec<Strin
             let (base, mut segments, _) = flatten_expression_path(root)?;
             segments.push(segment.clone());
             Some((base, segments, span.clone()))
+        }
+        Expr::Call {
+            function,
+            args,
+            span,
+        } if args.len() == 1 && function.starts_with("as ") => {
+            let type_name = function.strip_prefix("as ")?.trim();
+            let segments = if type_name.contains("::") {
+                type_name.split("::").map(str::to_string).collect()
+            } else {
+                type_name.split('.').map(str::to_string).collect()
+            };
+            Some((
+                ExpressionPathRoot::CastType(QualifiedName {
+                    segments,
+                    span: span.clone(),
+                }),
+                Vec::new(),
+                span.clone(),
+            ))
         }
         _ => None,
     }
@@ -2993,6 +3247,21 @@ fn resolve_redefinition_feature_reference_with_seen(
     }
 
     if name.segments.len() == 1 {
+        if let Some(local) = unique_definition_owned_feature_match_excluding(
+            name.segments.first()?,
+            local_feature_index,
+            definition_index,
+            &usage.qualified_name,
+        ) {
+            return Some(feature_id_from_qualified_name(&local));
+        }
+        if let Some(local) = unique_feature_match_excluding(
+            name.segments.first()?,
+            local_feature_index,
+            &usage.qualified_name,
+        ) {
+            return Some(feature_id_from_qualified_name(&local));
+        }
         unique_suffix_match(name.segments.first()?, stdlib_ids)
     } else {
         resolve_qualified_reference(
@@ -3131,7 +3400,19 @@ fn resolve_enclosing_usage_inherited_feature_reference(
         }
         cursor = owner_usage.owner_qualified_name.clone();
     }
-    None
+    resolve_inherited_definition_feature_reference(
+        &cursor,
+        name,
+        stdlib_ids,
+        stdlib_feature_index,
+        stdlib_aliases,
+        local_definitions,
+        local_aliases,
+        import_aliases,
+        definition_index,
+        local_feature_index,
+        seen_definitions,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3224,6 +3505,9 @@ fn resolve_owner_usage_feature_reference(
     let owner_usage = local_usage_map.get(owner_qualified_name)?;
     let mut candidate_definitions = BTreeSet::new();
     let mut stdlib_owner_ids = BTreeSet::new();
+    if let Some(stdlib_owner) = usage_construct_stdlib_owner(&owner_usage.construct) {
+        stdlib_owner_ids.insert(stdlib_owner.to_string());
+    }
 
     if let Some(type_name) = &owner_usage.ty
         && let Some(type_id) = resolve_type_reference(
@@ -3397,6 +3681,62 @@ fn unique_feature_match(
         matches.into_iter().next()
     } else {
         None
+    }
+}
+
+fn unique_feature_match_excluding(
+    dotted_name: &str,
+    local_feature_index: &BTreeMap<String, BTreeMap<String, String>>,
+    excluded_qualified_name: &str,
+) -> Option<String> {
+    let matches = local_feature_index
+        .values()
+        .flat_map(BTreeMap::values)
+        .filter(|qualified_name| {
+            qualified_name.as_str() != excluded_qualified_name
+                && (*qualified_name == dotted_name
+                    || qualified_name.ends_with(&format!(".{dotted_name}")))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        matches.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn unique_definition_owned_feature_match_excluding(
+    dotted_name: &str,
+    local_feature_index: &BTreeMap<String, BTreeMap<String, String>>,
+    definition_index: &BTreeMap<String, CollectedDefinition>,
+    excluded_qualified_name: &str,
+) -> Option<String> {
+    let matches = local_feature_index
+        .values()
+        .flat_map(BTreeMap::values)
+        .filter(|qualified_name| {
+            qualified_name.as_str() != excluded_qualified_name
+                && (*qualified_name == dotted_name
+                    || qualified_name.ends_with(&format!(".{dotted_name}")))
+                && qualified_name
+                    .rsplit_once('.')
+                    .is_some_and(|(owner, _)| definition_index.contains_key(owner))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        matches.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn usage_construct_stdlib_owner(construct: &str) -> Option<&'static str> {
+    match construct {
+        "SendUsage" => Some("Actions::SendAction"),
+        "AcceptActionUsage" => Some("Actions::AcceptAction"),
+        _ => None,
     }
 }
 
@@ -3687,15 +4027,71 @@ fn infer_usage_type_from_feature_id(
     local_usage_map: &BTreeMap<String, CollectedUsage>,
 ) -> Option<String> {
     let target = feature_id.strip_prefix("feature.")?;
-    let ty = local_usage_map.get(target)?.ty.as_ref()?;
-    resolve_type_reference(
+    let usage = local_usage_map.get(target)?;
+    let ty = usage.ty.as_ref()?;
+    resolve_type_reference_in_scope(
         ty,
+        &usage.owner_qualified_name,
         stdlib_ids,
         stdlib_aliases,
         local_definitions,
         local_aliases,
         import_aliases,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_feature_reference_from_type_id(
+    type_id: &str,
+    segment: &str,
+    stdlib_ids: &[String],
+    stdlib_feature_index: &BTreeMap<String, BTreeMap<String, String>>,
+    stdlib_aliases: &BTreeMap<String, String>,
+    local_definitions: &BTreeMap<String, String>,
+    local_aliases: &BTreeMap<String, QualifiedName>,
+    import_aliases: &ImportAliases,
+    definition_index: &BTreeMap<String, CollectedDefinition>,
+    local_feature_index: &BTreeMap<String, BTreeMap<String, String>>,
+) -> Option<String> {
+    let name = QualifiedName {
+        segments: vec![segment.to_string()],
+        span: SourceSpan {
+            start_line: 0,
+            start_col: 0,
+            end_line: 0,
+            end_col: 0,
+        },
+    };
+
+    if let Some(qualified_name) = type_id.strip_prefix("type.") {
+        if let Some(local) = resolve_owner_feature_name(
+            qualified_name,
+            &name,
+            local_aliases,
+            import_aliases,
+            local_feature_index,
+        ) {
+            return Some(feature_id_from_qualified_name(&local));
+        }
+
+        let mut seen = BTreeSet::new();
+        return resolve_inherited_definition_feature_reference(
+            qualified_name,
+            &name,
+            stdlib_ids,
+            stdlib_feature_index,
+            stdlib_aliases,
+            local_definitions,
+            local_aliases,
+            import_aliases,
+            definition_index,
+            local_feature_index,
+            &mut seen,
+        )
+        .map(|qualified| feature_id_from_qualified_name(&qualified));
+    }
+
+    resolve_stdlib_owned_feature_reference(type_id, &name, stdlib_feature_index)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3712,6 +4108,27 @@ fn resolve_feature_reference_from_feature_type(
     local_feature_index: &BTreeMap<String, BTreeMap<String, String>>,
     local_usage_map: &BTreeMap<String, CollectedUsage>,
 ) -> Option<String> {
+    if let Some(target_qualified_name) = feature_id.strip_prefix("feature.") {
+        let name = QualifiedName {
+            segments: vec![segment.to_string()],
+            span: SourceSpan {
+                start_line: 0,
+                start_col: 0,
+                end_line: 0,
+                end_col: 0,
+            },
+        };
+        if let Some(local) = resolve_owner_feature_name(
+            target_qualified_name,
+            &name,
+            local_aliases,
+            import_aliases,
+            local_feature_index,
+        ) {
+            return Some(feature_id_from_qualified_name(&local));
+        }
+    }
+
     let type_id = infer_usage_type_from_feature_id(
         feature_id,
         stdlib_ids,
@@ -3720,32 +4137,66 @@ fn resolve_feature_reference_from_feature_type(
         local_aliases,
         import_aliases,
         local_usage_map,
-    )?;
-    let qualified_name = type_id.strip_prefix("type.")?;
-    let name = QualifiedName {
-        segments: vec![segment.to_string()],
-        span: SourceSpan {
-            start_line: 0,
-            start_col: 0,
-            end_line: 0,
-            end_col: 0,
-        },
-    };
+    );
+    if type_id.is_none()
+        && let Some(target_id) = resolve_usage_feature_type_from_feature_id(
+            feature_id,
+            stdlib_ids,
+            stdlib_feature_index,
+            stdlib_aliases,
+            local_definitions,
+            local_aliases,
+            import_aliases,
+            definition_index,
+            local_feature_index,
+            local_usage_map,
+        )
+        && let Some(target_qualified_name) = target_id.strip_prefix("feature.")
+    {
+        let name = QualifiedName {
+            segments: vec![segment.to_string()],
+            span: SourceSpan {
+                start_line: 0,
+                start_col: 0,
+                end_line: 0,
+                end_col: 0,
+            },
+        };
 
-    if let Some(local) = resolve_owner_feature_name(
-        qualified_name,
-        &name,
-        local_aliases,
-        import_aliases,
-        local_feature_index,
-    ) {
-        return Some(feature_id_from_qualified_name(&local));
+        if let Some(local) = resolve_owner_feature_name(
+            target_qualified_name,
+            &name,
+            local_aliases,
+            import_aliases,
+            local_feature_index,
+        ) {
+            return Some(feature_id_from_qualified_name(&local));
+        }
+
+        let mut seen_usages = BTreeSet::new();
+        let mut seen_definitions = BTreeSet::new();
+        if let Some(inherited) = resolve_owner_usage_feature_reference(
+            target_qualified_name,
+            &name,
+            stdlib_ids,
+            stdlib_feature_index,
+            stdlib_aliases,
+            local_definitions,
+            local_aliases,
+            import_aliases,
+            definition_index,
+            local_feature_index,
+            local_usage_map,
+            &mut seen_usages,
+            &mut seen_definitions,
+        ) {
+            return Some(normalize_feature_target_id(&inherited));
+        }
     }
 
-    let mut seen = BTreeSet::new();
-    resolve_inherited_definition_feature_reference(
-        qualified_name,
-        &name,
+    resolve_feature_reference_from_type_id(
+        &type_id?,
+        segment,
         stdlib_ids,
         stdlib_feature_index,
         stdlib_aliases,
@@ -3754,9 +4205,38 @@ fn resolve_feature_reference_from_feature_type(
         import_aliases,
         definition_index,
         local_feature_index,
-        &mut seen,
     )
-    .map(|qualified| feature_id_from_qualified_name(&qualified))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_usage_feature_type_from_feature_id(
+    feature_id: &str,
+    stdlib_ids: &[String],
+    stdlib_feature_index: &BTreeMap<String, BTreeMap<String, String>>,
+    stdlib_aliases: &BTreeMap<String, String>,
+    local_definitions: &BTreeMap<String, String>,
+    local_aliases: &BTreeMap<String, QualifiedName>,
+    import_aliases: &ImportAliases,
+    definition_index: &BTreeMap<String, CollectedDefinition>,
+    local_feature_index: &BTreeMap<String, BTreeMap<String, String>>,
+    local_usage_map: &BTreeMap<String, CollectedUsage>,
+) -> Option<String> {
+    let target = feature_id.strip_prefix("feature.")?;
+    let usage = local_usage_map.get(target)?;
+    let ty = usage.ty.as_ref()?;
+    resolve_feature_reference(
+        usage,
+        ty,
+        stdlib_ids,
+        stdlib_feature_index,
+        stdlib_aliases,
+        local_definitions,
+        local_aliases,
+        import_aliases,
+        definition_index,
+        local_feature_index,
+        local_usage_map,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3892,6 +4372,17 @@ fn resolve_type_reference(
     local_aliases: &BTreeMap<String, QualifiedName>,
     import_aliases: &ImportAliases,
 ) -> Option<String> {
+    if let Some(unconjugated) = unconjugated_type_name(name) {
+        return resolve_type_reference(
+            &unconjugated,
+            stdlib_ids,
+            stdlib_aliases,
+            local_definitions,
+            local_aliases,
+            import_aliases,
+        );
+    }
+
     if name.segments.len() == 1 {
         let simple = &name.segments[0];
         if let Some(local) = local_definitions.get(simple) {
@@ -3973,8 +4464,21 @@ fn resolve_type_reference_in_scope(
     local_aliases: &BTreeMap<String, QualifiedName>,
     import_aliases: &ImportAliases,
 ) -> Option<String> {
-    resolve_scoped_local_type_reference(name, owner_qualified_name, local_definitions).or_else(
-        || {
+    if let Some(unconjugated) = unconjugated_type_name(name) {
+        return resolve_type_reference_in_scope(
+            &unconjugated,
+            owner_qualified_name,
+            stdlib_ids,
+            stdlib_aliases,
+            local_definitions,
+            local_aliases,
+            import_aliases,
+        );
+    }
+
+    resolve_scoped_local_type_reference(name, owner_qualified_name, local_definitions)
+        .or_else(|| resolve_scoped_import_value_alias(name, owner_qualified_name, import_aliases))
+        .or_else(|| {
             resolve_visible_type_reference(
                 name,
                 stdlib_ids,
@@ -3983,8 +4487,31 @@ fn resolve_type_reference_in_scope(
                 local_aliases,
                 import_aliases,
             )
-        },
-    )
+        })
+}
+
+fn resolve_scoped_import_value_alias(
+    name: &QualifiedName,
+    owner_qualified_name: &str,
+    import_aliases: &ImportAliases,
+) -> Option<String> {
+    if name.segments.len() != 1 {
+        return None;
+    }
+
+    let simple = name.segments.first()?;
+    let mut cursor = owner_qualified_name;
+    loop {
+        let key = format!("{cursor}.{simple}");
+        if let Some(imported) = import_aliases.value_aliases.get(&key) {
+            return Some(imported.clone());
+        }
+        let Some((parent, _)) = cursor.rsplit_once('.') else {
+            break;
+        };
+        cursor = parent;
+    }
+    None
 }
 
 fn resolve_visible_type_reference(
@@ -4032,6 +4559,20 @@ fn resolve_visible_type_reference(
     }
 
     resolve_explicit_type_reference(name, stdlib_ids, stdlib_aliases, local_definitions)
+}
+
+fn unconjugated_type_name(name: &QualifiedName) -> Option<QualifiedName> {
+    let first = name.segments.first()?;
+    let stripped = first.strip_prefix('~')?;
+    if stripped.is_empty() {
+        return None;
+    }
+    let mut segments = name.segments.clone();
+    segments[0] = stripped.to_string();
+    Some(QualifiedName {
+        segments,
+        span: name.span.clone(),
+    })
 }
 
 fn resolve_explicit_type_reference(
@@ -4201,6 +4742,13 @@ fn build_stdlib_alias_map(
         "Interfaces::Interface",
         "sysml.Interface",
     );
+    add_compat_stdlib_alias(
+        &mut aliases,
+        stdlib,
+        "ISQSpaceTime::breadth",
+        "ISQSpaceTime::width",
+    );
+    add_compat_stdlib_alias(&mut aliases, stdlib, "breadth", "ISQSpaceTime::width");
 
     aliases
 }
@@ -4378,7 +4926,9 @@ fn qualify_segments(
 mod tests {
     use super::*;
     use crate::frontend::ast::SourceSpan;
+    use crate::frontend::sysml::parse_sysml;
     use crate::frontend::transpile::MappingBundle;
+    use crate::ir::KirElement;
 
     #[test]
     fn expand_import_namespace_prefix_ignores_noop_expansion() {
@@ -4480,5 +5030,107 @@ mod tests {
         );
 
         assert_eq!(resolved.as_deref(), Some("type.ItemTest.A"));
+    }
+
+    #[test]
+    fn expression_path_resolves_cast_target_features() {
+        let module = parse_sysml(
+            r#"
+            package Demo {
+                part def VehiclePart {
+                    attribute m;
+                }
+
+                part def Vehicle :> VehiclePart;
+                part vehicle : Vehicle;
+                part vehicles[*] = (vehicle, vehicle);
+                attribute masses1[*] = (vehicles as VehiclePart).m;
+                attribute masses2[*] = (vehicles as vehicle).m;
+            }
+            "#,
+        )
+        .unwrap();
+        let stdlib = fake_stdlib([]);
+        let mappings = MappingBundle::load().unwrap();
+
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let expressions = resolved
+            .usages
+            .iter()
+            .filter(|usage| usage.declared_name == "masses1" || usage.declared_name == "masses2")
+            .map(|usage| usage.expression.as_ref())
+            .collect::<Vec<_>>();
+        assert_eq!(expressions.len(), 2);
+        assert!(expressions.iter().all(|expression| expression.is_some()));
+    }
+
+    #[test]
+    fn expression_path_resolves_calculation_return_feature() {
+        let module = parse_sysml(
+            r#"
+            package Demo {
+                calc def Acceleration {
+                    return a;
+                }
+
+                action dyn {
+                    calc acc : Acceleration;
+                    bind out = acc.a;
+                }
+            }
+            "#,
+        )
+        .unwrap();
+        let stdlib = fake_stdlib([]);
+        let mappings = MappingBundle::load().unwrap();
+
+        let resolved = resolve_module(&module, &stdlib, &mappings).unwrap();
+
+        let bind = resolved
+            .usages
+            .iter()
+            .find_map(|usage| find_resolved_usage_by_declared_name(usage, "out"))
+            .expect("expected bind usage");
+        assert!(bind.expression.is_some());
+    }
+
+    fn find_resolved_usage_by_declared_name<'a>(
+        usage: &'a ResolvedUsage,
+        declared_name: &str,
+    ) -> Option<&'a ResolvedUsage> {
+        if usage.declared_name == declared_name {
+            return Some(usage);
+        }
+        usage
+            .members
+            .iter()
+            .find_map(|member| find_resolved_usage_by_declared_name(member, declared_name))
+    }
+
+    fn fake_stdlib<const N: usize>(ids: [&str; N]) -> KirDocument {
+        let default_ids = [
+            "Actions::Action",
+            "Base::DataValue",
+            "BinaryConnection",
+            "Items::Item",
+            "Parts::Part",
+            "Ports::Port",
+        ];
+        KirDocument {
+            metadata: BTreeMap::new(),
+            elements: default_ids
+                .into_iter()
+                .chain(ids)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|id| KirElement {
+                    id: id.to_string(),
+                    kind: id.to_string(),
+                    layer: 1,
+                    properties: BTreeMap::new(),
+                })
+                .collect(),
+        }
     }
 }

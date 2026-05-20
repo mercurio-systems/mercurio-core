@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use mercurio_core::frontend::sysml::compile_sysml_text;
+use mercurio_core::source_set::{
+    SourceCompileContext, SourceDocument, compile_source_document_with_context,
+};
 use mercurio_core::{
-    Graph, KirDocument, KirElement, MetamodelAttributeRegistry, PilotExportDocument, SnapshotMode,
+    Graph, KirDocument, MetamodelAttributeRegistry, PilotExportDocument, SnapshotMode,
     build_semantic_snapshot, build_semantic_snapshot_with_registry, compare_snapshots,
     default_stdlib_path, load_pilot_export, normalize_pilot_export_for_compare, repo_path,
 };
@@ -18,8 +20,8 @@ const DEFAULT_PILOT_ROOT: &str = "../SysML-v2-Pilot-Implementation";
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args()?;
     let corpus_seed = PilotCorpusSeed::load()?;
-    match (&args.relative_path, &args.corpus_name) {
-        (Some(relative_path), None) => {
+    match &args.relative_path {
+        Some(relative_path) => {
             let output = run_compare_case(&args.pilot_root, relative_path, &corpus_seed)?;
 
             if let Some(parent) = args.output_path.parent() {
@@ -41,19 +43,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  pilot total ms: {}", output.timings.pilot.total_ms);
             println!("  compare ms: {}", output.timings.compare_ms);
         }
-        (None, Some(corpus_name)) => {
-            let relative_paths = corpus_seed
-                .corpus(corpus_name)
-                .ok_or_else(|| format!("unknown corpus `{corpus_name}`"))?;
+        None => {
+            let (corpus_name, relative_paths) = args.corpus_paths(&corpus_seed)?;
             let (pilot_cases, shared_timings) = export_corpus_from_pilot(
                 &args.pilot_root,
-                corpus_name,
-                relative_paths,
+                &corpus_name,
+                &relative_paths,
                 &corpus_seed,
             )?;
             let mut cases = Vec::new();
 
-            for relative_path in relative_paths {
+            for relative_path in &relative_paths {
                 match run_compare_case_from_batch(
                     &args.pilot_root,
                     relative_path,
@@ -74,7 +74,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("failed {}: {}", relative_path, err);
                         cases.push(CorpusCaseSummary::failure(
                             relative_path.to_string(),
-                            corpus_seed.support_paths_for(relative_path).len(),
+                            corpus_seed
+                                .support_paths_for_case(&args.pilot_root, relative_path)
+                                .len(),
                             err.to_string(),
                         ));
                     }
@@ -84,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let corpus_output = CorpusCompareOutput {
                 generated_at_utc: now_utc_rfc3339()?,
                 pilot_root: args.pilot_root.display().to_string(),
-                corpus_name: corpus_name.clone(),
+                corpus_name,
                 case_count: cases.len(),
                 shared_timings,
                 aggregate: CorpusAggregate::from_cases(&cases),
@@ -128,7 +130,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  pilot shared setup ms: {}", shared_timings.pilot.total_ms);
             }
         }
-        _ => unreachable!(),
     }
 
     Ok(())
@@ -139,7 +140,39 @@ struct Args {
     pilot_root: PathBuf,
     relative_path: Option<String>,
     corpus_name: Option<String>,
+    paths_file: Option<PathBuf>,
     output_path: PathBuf,
+}
+
+impl Args {
+    fn corpus_paths(
+        &self,
+        corpus_seed: &PilotCorpusSeed,
+    ) -> Result<(String, Vec<String>), Box<dyn std::error::Error>> {
+        if let Some(paths_file) = &self.paths_file {
+            let paths = std::fs::read_to_string(paths_file)?
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            let name = paths_file
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("paths")
+                .to_string();
+            return Ok((name, paths));
+        }
+
+        let corpus_name = self
+            .corpus_name
+            .as_deref()
+            .ok_or("provide --relative-path, --corpus, or --paths-file")?;
+        Ok((
+            corpus_name.to_string(),
+            corpus_seed.corpus_paths(corpus_name, &self.pilot_root)?,
+        ))
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -299,15 +332,120 @@ impl PilotCorpusSeed {
             .unwrap_or(&[])
     }
 
-    fn corpus(&self, name: &str) -> Option<&[String]> {
-        self.corpora.get(name).map(Vec::as_slice)
+    fn support_paths_for_case(&self, pilot_root: &Path, relative_path: &str) -> Vec<String> {
+        let mut support_paths = Vec::new();
+        for path in self.support_paths_for(relative_path) {
+            push_unique(&mut support_paths, path.clone());
+        }
+        for path in same_folder_sysml_paths(pilot_root, relative_path) {
+            if path != relative_path {
+                push_unique(&mut support_paths, path);
+            }
+        }
+        support_paths
     }
+
+    fn corpus_paths(
+        &self,
+        name: &str,
+        pilot_root: &Path,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        if name == "all" {
+            return discover_all_pilot_examples(pilot_root);
+        }
+        self.corpora
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("unknown corpus `{name}`").into())
+    }
+}
+
+fn discover_all_pilot_examples(
+    pilot_root: &Path,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut stack = vec![
+        pilot_root.join("sysml/src/examples"),
+        pilot_root.join("sysml/src/training"),
+        pilot_root.join("sysml/src/validation"),
+    ];
+    let mut files = Vec::new();
+
+    while let Some(path) = stack.pop() {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(&path)? {
+                stack.push(entry?.path());
+            }
+            continue;
+        }
+
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "sysml")
+        {
+            files.push(
+                path.strip_prefix(pilot_root)?
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        }
+    }
+
+    files.sort();
+    Ok(files)
+}
+
+fn same_folder_sysml_paths(pilot_root: &Path, relative_path: &str) -> Vec<String> {
+    let Some(parent) = Path::new(relative_path).parent() else {
+        return Vec::new();
+    };
+    let folder = pilot_root.join(parent);
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+
+    let mut paths = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "sysml")
+        })
+        .filter_map(|path| {
+            path.strip_prefix(pilot_root)
+                .ok()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+fn push_unique(paths: &mut Vec<String>, path: String) {
+    if !paths.contains(&path) {
+        paths.push(path);
+    }
+}
+
+fn group_paths_by_folder(relative_paths: &[String]) -> BTreeMap<String, Vec<String>> {
+    let mut groups = BTreeMap::new();
+    for relative_path in relative_paths {
+        let folder = Path::new(relative_path)
+            .parent()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        groups
+            .entry(folder)
+            .or_insert_with(Vec::new)
+            .push(relative_path.clone());
+    }
+    groups
 }
 
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let mut pilot_root = PathBuf::from(DEFAULT_PILOT_ROOT);
     let mut relative_path = None;
     let mut corpus_name = None;
+    let mut paths_file = None;
     let mut output_path = repo_path("target/pilot_semantic_compare.json");
     let args = env::args().skip(1).collect::<Vec<_>>();
     let mut index = 0;
@@ -335,6 +473,12 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
                         .to_string(),
                 );
             }
+            "--paths-file" => {
+                index += 1;
+                paths_file = Some(PathBuf::from(
+                    args.get(index).ok_or("missing value for --paths-file")?,
+                ));
+            }
             "--out" => {
                 index += 1;
                 output_path = PathBuf::from(args.get(index).ok_or("missing value for --out")?);
@@ -348,21 +492,25 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
         index += 1;
     }
 
-    if relative_path.is_some() == corpus_name.is_some() {
-        return Err("provide exactly one of --relative-path or --corpus".into());
+    let selector_count = usize::from(relative_path.is_some())
+        + usize::from(corpus_name.is_some())
+        + usize::from(paths_file.is_some());
+    if selector_count != 1 {
+        return Err("provide exactly one of --relative-path, --corpus, or --paths-file".into());
     }
 
     Ok(Args {
         pilot_root,
         relative_path,
         corpus_name,
+        paths_file,
         output_path,
     })
 }
 
 fn print_usage() {
     println!(
-        "Usage: cargo run -p mercurio-tools --bin compare_pilot_semantics -- (--relative-path PATH | --corpus NAME) [--pilot-root PATH] [--out PATH]"
+        "Usage: cargo run -p mercurio-tools --bin compare_pilot_semantics -- (--relative-path PATH | --corpus NAME|all | --paths-file PATH) [--pilot-root PATH] [--out PATH]"
     );
 }
 
@@ -473,29 +621,50 @@ fn build_mercurio_case(
     relative_path: &str,
     corpus_seed: &PilotCorpusSeed,
 ) -> Result<MercurioCaseResult, Box<dyn std::error::Error>> {
-    let support_paths = corpus_seed.support_paths_for(relative_path).to_vec();
+    let support_paths = corpus_seed.support_paths_for_case(pilot_root, relative_path);
     let mercurio_start = Instant::now();
     let load_stdlib_start = Instant::now();
     let stdlib = KirDocument::from_path(&default_stdlib_path())?;
     let load_stdlib_ms = elapsed_ms(load_stdlib_start);
 
-    let support_compile_start = Instant::now();
-    let augmented_stdlib = build_augmented_stdlib(pilot_root, &support_paths, &stdlib)?;
-    let support_compile_ms = elapsed_ms(support_compile_start);
-    let metamodel_registry =
-        MetamodelAttributeRegistry::build(&Graph::from_document(augmented_stdlib.clone())?);
+    let read_parse_start = Instant::now();
+    let source_documents = read_source_documents(pilot_root, &support_paths, relative_path)?;
+    let read_parse_ms = elapsed_ms(read_parse_start);
 
-    let compile_l2_start = Instant::now();
-    let source_text = std::fs::read_to_string(pilot_root.join(relative_path))?;
-    let mercurio_user = compile_sysml_text(&source_text, relative_path, &augmented_stdlib)?;
-    let compile_l2_ms = elapsed_ms(compile_l2_start);
+    let context_start = Instant::now();
+    let compile_context = SourceCompileContext::from_source_documents(&source_documents, &stdlib)?;
+    let context_ms = elapsed_ms(context_start);
+
+    let target_document = source_documents
+        .iter()
+        .find(|file| file.path == relative_path)
+        .ok_or_else(|| format!("source set missing target `{relative_path}`"))?;
+
+    let compile_start = Instant::now();
+    let mut source_kir = Vec::new();
+    source_kir.push(compile_source_document_with_context(
+        target_document,
+        &compile_context,
+        &stdlib,
+    )?);
+    for file in source_documents
+        .iter()
+        .filter(|file| file.path != relative_path)
+    {
+        if let Ok(document) = compile_source_document_with_context(file, &compile_context, &stdlib)
+        {
+            source_kir.push(document);
+        }
+    }
+    let source_document = KirDocument::merge(source_kir)?;
+    let compile_ms = elapsed_ms(compile_start);
+
+    let merged_document = KirDocument::merge([stdlib, source_document])?;
+    let metamodel_registry =
+        MetamodelAttributeRegistry::build(&Graph::from_document(merged_document.clone())?);
 
     let snapshot_start = Instant::now();
-    let snapshot = build_semantic_snapshot(
-        KirDocument::merge([augmented_stdlib, mercurio_user])?,
-        relative_path,
-        SnapshotMode::Mercurio,
-    )?;
+    let snapshot = build_semantic_snapshot(merged_document, relative_path, SnapshotMode::Mercurio)?;
     let snapshot_ms = elapsed_ms(snapshot_start);
 
     Ok(MercurioCaseResult {
@@ -510,12 +679,16 @@ fn build_mercurio_case(
                     duration_ms: load_stdlib_ms,
                 },
                 PhaseTiming {
-                    name: "compile_support_models".to_string(),
-                    duration_ms: support_compile_ms,
+                    name: "read_parse_source_set".to_string(),
+                    duration_ms: read_parse_ms,
                 },
                 PhaseTiming {
-                    name: "compile_l2_model".to_string(),
-                    duration_ms: compile_l2_ms,
+                    name: "build_resolver_context".to_string(),
+                    duration_ms: context_ms,
+                },
+                PhaseTiming {
+                    name: "compile_source_set".to_string(),
+                    duration_ms: compile_ms,
                 },
                 PhaseTiming {
                     name: "merge_and_snapshot".to_string(),
@@ -524,6 +697,22 @@ fn build_mercurio_case(
             ],
         },
     })
+}
+
+fn read_source_documents(
+    pilot_root: &Path,
+    support_paths: &[String],
+    relative_path: &str,
+) -> Result<Vec<SourceDocument>, Box<dyn std::error::Error>> {
+    let mut paths = support_paths.to_vec();
+    paths.push(relative_path.to_string());
+    paths
+        .into_iter()
+        .map(|path| {
+            let content = std::fs::read_to_string(pilot_root.join(&path))?;
+            Ok(SourceDocument::new(path.clone(), content))
+        })
+        .collect()
 }
 
 fn build_compare_output(
@@ -653,51 +842,6 @@ fn aggregate_timing(values: impl IntoIterator<Item = u64>) -> AggregateTiming {
     }
 }
 
-fn build_augmented_stdlib(
-    pilot_root: &Path,
-    support_paths: &[String],
-    stdlib: &KirDocument,
-) -> Result<KirDocument, Box<dyn std::error::Error>> {
-    let mut augmented = stdlib.clone();
-
-    for support_path in support_paths {
-        let support_text = std::fs::read_to_string(pilot_root.join(support_path))?;
-        let support_document = compile_sysml_text(&support_text, support_path, &augmented)?;
-        for element in synthetic_support_elements(&support_document) {
-            augmented.elements.push(element);
-        }
-    }
-
-    Ok(augmented)
-}
-
-fn synthetic_support_elements(document: &KirDocument) -> Vec<KirElement> {
-    document
-        .elements
-        .iter()
-        .filter_map(|element| {
-            let synthetic_id = if let Some(path) = element.id.strip_prefix("pkg.") {
-                Some(path.replace('.', "::"))
-            } else if let Some(path) = element.id.strip_prefix("type.") {
-                Some(path.replace('.', "::"))
-            } else {
-                None
-            }?;
-
-            Some(KirElement {
-                id: synthetic_id,
-                kind: if element.kind.contains("Package") {
-                    "LibraryPackage".to_string()
-                } else {
-                    element.kind.clone()
-                },
-                layer: element.layer,
-                properties: element.properties.clone(),
-            })
-        })
-        .collect()
-}
-
 fn export_model_from_pilot(
     pilot_root: &Path,
     relative_path: &str,
@@ -757,18 +901,61 @@ fn export_corpus_from_pilot(
     ),
     Box<dyn std::error::Error>,
 > {
+    let mut all_cases = BTreeMap::new();
+    let mut total_shared_ms = 0;
+    let mut shared_phases = Vec::new();
+
+    for (folder, folder_paths) in group_paths_by_folder(relative_paths) {
+        let group_slug = format!(
+            "{}.{}",
+            corpus_name.replace(['\\', '/', ' '], "_"),
+            relative_path_slug(&folder)
+        );
+        let (cases, timings) =
+            export_corpus_group_from_pilot(pilot_root, &group_slug, &folder_paths, corpus_seed)?;
+        if let Some(timings) = timings {
+            total_shared_ms += timings.pilot.total_ms;
+            shared_phases.push(PhaseTiming {
+                name: format!("folder_batch:{folder}"),
+                duration_ms: timings.pilot.total_ms,
+            });
+        }
+        all_cases.extend(cases);
+    }
+
+    let shared_timings = CorpusSharedTimings {
+        pilot: EngineTimings {
+            total_ms: total_shared_ms,
+            phases: shared_phases,
+        },
+    };
+
+    Ok((all_cases, Some(shared_timings)))
+}
+
+fn export_corpus_group_from_pilot(
+    pilot_root: &Path,
+    group_slug: &str,
+    relative_paths: &[String],
+    corpus_seed: &PilotCorpusSeed,
+) -> Result<
+    (
+        BTreeMap<String, PilotBatchExportCase>,
+        Option<CorpusSharedTimings>,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let pilot_root = pilot_root.canonicalize()?;
     let library_root = pilot_root.join("sysml.library");
     let interactive_jar = find_interactive_jar(&pilot_root)?;
     let classes_dir = repo_path("target/pilot-exporter-classes");
     let java_source =
         repo_path("tools/pilot-exporter/src/main/java/dev/mercurio/pilot/PilotModelExporter.java");
-    let corpus_slug = corpus_name.replace(['\\', '/', ' '], "_");
     let export_path = repo_path(&format!(
-        "target/pilot_model_export.compare.batch.{corpus_slug}.json"
+        "target/pilot_model_export.compare.batch.{group_slug}.json"
     ));
     let spec_path = repo_path(&format!(
-        "target/pilot_model_export.compare.batch.{corpus_slug}.spec.json"
+        "target/pilot_model_export.compare.batch.{group_slug}.spec.json"
     ));
 
     compile_java_exporter(
@@ -784,7 +971,7 @@ fn export_corpus_from_pilot(
             .map(|relative_path| PilotCorpusSpecCase {
                 relative_path,
                 input_files: corpus_seed
-                    .support_paths_for(relative_path)
+                    .support_paths_for_case(&pilot_root, relative_path)
                     .iter()
                     .map(|path| pilot_root.join(path).display().to_string())
                     .chain(std::iter::once(
