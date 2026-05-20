@@ -58,7 +58,8 @@ pub use diagrams::{
 };
 pub use expression::{
     BinaryExpressionOp, ExpressionEvaluationContext, ExpressionEvaluationError, ExpressionIr,
-    ExpressionIrError, ExpressionPathRoot, ExpressionPathSegment, UnaryExpressionOp,
+    ExpressionIrError, ExpressionPathRoot, ExpressionPathSegment, ExpressionValidationError,
+    UnaryExpressionOp,
 };
 pub use feasibility::{
     AttributePolicyAnswer, CapabilityAnswer, ConservativeSemanticCapabilityOracle,

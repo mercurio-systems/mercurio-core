@@ -113,6 +113,34 @@ impl fmt::Display for ExpressionIrError {
 
 impl std::error::Error for ExpressionIrError {}
 
+#[derive(Debug)]
+pub enum ExpressionValidationError {
+    UnsupportedPathRoot(String),
+    EmptyPath,
+    UnsupportedFunction(String),
+    InvalidFunctionArity { function: String, arity: usize },
+}
+
+impl fmt::Display for ExpressionValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedPathRoot(root) => {
+                write!(f, "unsupported expression_ir path root `{root}`")
+            }
+            Self::EmptyPath => write!(f, "expression_ir path must have at least one segment"),
+            Self::UnsupportedFunction(function) => {
+                write!(f, "unsupported expression_ir function `{function}`")
+            }
+            Self::InvalidFunctionArity { function, arity } => write!(
+                f,
+                "expression_ir function `{function}` expects one argument, got {arity}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ExpressionValidationError {}
+
 impl ExpressionIr {
     pub fn from_value(value: &Value) -> Result<Self, ExpressionIrError> {
         let kind = value
@@ -134,10 +162,54 @@ impl ExpressionIr {
         serde_json::to_value(self).map_err(|err| ExpressionIrError::Invalid(err.to_string()))
     }
 
+    pub fn validate_runtime_supported(&self) -> Result<(), ExpressionValidationError> {
+        match self {
+            Self::Literal { .. } | Self::SelfRef => Ok(()),
+            Self::Tuple { items } => {
+                for item in items {
+                    item.validate_runtime_supported()?;
+                }
+                Ok(())
+            }
+            Self::Path { root, segments } => {
+                if *root != ExpressionPathRoot::SelfRef {
+                    return Err(ExpressionValidationError::UnsupportedPathRoot(
+                        root.as_str().to_string(),
+                    ));
+                }
+                if segments.is_empty() {
+                    return Err(ExpressionValidationError::EmptyPath);
+                }
+                Ok(())
+            }
+            Self::Unary { expr, .. } => expr.validate_runtime_supported(),
+            Self::Binary { left, right, .. } => {
+                left.validate_runtime_supported()?;
+                right.validate_runtime_supported()
+            }
+            Self::Call { function, args } => {
+                if !matches!(function.as_str(), "count" | "sum") {
+                    return Err(ExpressionValidationError::UnsupportedFunction(
+                        function.clone(),
+                    ));
+                }
+                if args.len() != 1 {
+                    return Err(ExpressionValidationError::InvalidFunctionArity {
+                        function: function.clone(),
+                        arity: args.len(),
+                    });
+                }
+                args[0].validate_runtime_supported()
+            }
+        }
+    }
+
     pub fn evaluate(
         &self,
         context: &mut impl ExpressionEvaluationContext,
     ) -> Result<Value, ExpressionEvaluationError> {
+        self.validate_runtime_supported()
+            .map_err(|err| ExpressionEvaluationError::InvalidExpression(err.to_string()))?;
         match self {
             Self::Literal { value } => Ok(value.clone()),
             Self::SelfRef => Ok(Value::String(context.owner_id().to_string())),
@@ -541,5 +613,36 @@ mod tests {
                 ..
             } if owner == "assembly.Vehicle"
         ));
+    }
+
+    #[test]
+    fn validates_runtime_supported_function_policy() {
+        let expression = ExpressionIr::Call {
+            function: "avg".to_string(),
+            args: vec![ExpressionIr::Literal { value: json!(1) }],
+        };
+
+        let error = expression.validate_runtime_supported().unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "unsupported expression_ir function `avg`"
+        );
+    }
+
+    #[test]
+    fn validates_runtime_supported_call_arity() {
+        let expression = ExpressionIr::Call {
+            function: "sum".to_string(),
+            args: vec![
+                ExpressionIr::Literal { value: json!(1) },
+                ExpressionIr::Literal { value: json!(2) },
+            ],
+        };
+
+        let error = expression.validate_runtime_supported().unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "expression_ir function `sum` expects one argument, got 2"
+        );
     }
 }
