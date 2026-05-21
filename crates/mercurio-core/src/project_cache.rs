@@ -553,6 +553,7 @@ mod tests {
         source_file_fingerprints,
     };
     use crate::ir::{KirDocument, KirElement};
+    use crate::runtime::Runtime;
     use crate::source_set::SourceDocument;
 
     #[test]
@@ -576,6 +577,46 @@ mod tests {
         assert_eq!(second.cache_status, PersistentCacheStatus::PersistentHit);
         assert_eq!(first.document, second.document);
         assert!(second.cache_write_error.is_none());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn persistent_compile_cache_hit_preserves_runtime_end_state() {
+        let root = temp_dir("persistent_runtime_equivalence");
+        let cache = PersistentProjectCache::for_workspace_root(&root);
+        let library_context = test_library_context();
+        let sources = vec![
+            SourceDocument::new("domain.sysml", "package Domain { part def Camera; }"),
+            SourceDocument::new(
+                "usage.sysml",
+                "package Usage {
+                  import Domain::*;
+                  part camera : Camera;
+                }",
+            ),
+        ];
+
+        let miss = cache
+            .compile_source_documents(sources.clone(), &library_context, None)
+            .unwrap();
+        let hit = cache
+            .compile_source_documents(sources, &library_context, None)
+            .unwrap();
+
+        assert_eq!(miss.cache_status, PersistentCacheStatus::PersistentMiss);
+        assert_eq!(hit.cache_status, PersistentCacheStatus::PersistentHit);
+        assert_eq!(miss.document, hit.document);
+
+        let miss_runtime = Runtime::from_artifact(miss.runtime_artifact).unwrap();
+        let hit_runtime = Runtime::from_artifact(hit.runtime_artifact).unwrap();
+
+        assert_eq!(
+            miss_runtime.graph().elements(),
+            hit_runtime.graph().elements()
+        );
+        assert_eq!(miss_runtime.graph().edges(), hit_runtime.graph().edges());
+        assert_eq!(miss_runtime.derived(), hit_runtime.derived());
 
         std::fs::remove_dir_all(root).unwrap();
     }

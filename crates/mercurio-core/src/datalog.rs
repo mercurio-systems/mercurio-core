@@ -74,8 +74,19 @@ pub struct DerivedIndexes {
     pub requirements: BTreeSet<String>,
     pub satisfied_by: BTreeMap<String, BTreeSet<String>>,
     pub verified_by: BTreeMap<String, BTreeSet<String>>,
-    #[serde(default, skip)]
+    #[serde(
+        default,
+        serialize_with = "serialize_explanations",
+        deserialize_with = "deserialize_explanations"
+    )]
     explanations: BTreeMap<Fact, Explanation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ExplanationEntry {
+    fact: Fact,
+    explanation: Explanation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -420,6 +431,36 @@ impl DerivedIndexes {
         };
         self.explanations.get(&fact)
     }
+}
+
+fn serialize_explanations<S>(
+    explanations: &BTreeMap<Fact, Explanation>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    explanations
+        .iter()
+        .map(|(fact, explanation)| ExplanationEntry {
+            fact: fact.clone(),
+            explanation: explanation.clone(),
+        })
+        .collect::<Vec<_>>()
+        .serialize(serializer)
+}
+
+fn deserialize_explanations<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<Fact, Explanation>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let entries = Vec::<ExplanationEntry>::deserialize(deserializer)?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| (entry.fact, entry.explanation))
+        .collect())
 }
 
 pub fn extract_graph_facts(graph: &Graph) -> Vec<Fact> {

@@ -17,7 +17,7 @@ pub struct Graph {
     incoming: HashMap<NodeId, Vec<Edge>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Element {
     pub id: NodeId,
     pub element_id: String,
