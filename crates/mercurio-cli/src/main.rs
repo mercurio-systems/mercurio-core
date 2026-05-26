@@ -14,6 +14,13 @@ use mercurio_core::{
     Runtime, SemanticCompileStatus, SourceLanguage, default_stdlib_path, lint_text, parse_query,
     resolve_project_context, write_kpar_package,
 };
+use mercurio_reasoner_api::{
+    CapabilityDescriptor, ReasoningReport, ReasoningStatus, SemanticArtifactRef,
+    SemanticContextKind, SemanticContextRef,
+};
+use mercurio_reference_capabilities::{
+    analyze_requirement_coverage, builtin_reasoning_capabilities,
+};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -31,6 +38,7 @@ enum Command {
     Compile(CompileCommand),
     Evaluate(EvaluateCommand),
     Query(QueryCommand),
+    Reason(ReasonCommand),
     Lint(LintCommand),
     Package(PackageCommand),
     Project(ProjectCommand),
@@ -128,6 +136,40 @@ struct QueryCommand {
 }
 
 #[derive(Debug, Args)]
+struct ReasonCommand {
+    #[command(subcommand)]
+    command: ReasonSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ReasonSubcommand {
+    Capabilities(ReasonCapabilitiesCommand),
+    RequirementCoverage(RequirementCoverageCommand),
+}
+
+#[derive(Debug, Args)]
+struct ReasonCapabilitiesCommand {
+    #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+    format: OutputFormat,
+}
+
+#[derive(Debug, Args)]
+struct RequirementCoverageCommand {
+    #[command(flatten)]
+    input: SingleInput,
+    #[arg(long)]
+    kir: Option<PathBuf>,
+    #[arg(long)]
+    kpar: Option<PathBuf>,
+    #[arg(long, value_enum)]
+    language: Option<LanguageArg>,
+    #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+    format: OutputFormat,
+    #[arg(long)]
+    stdlib: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
 struct PackageCommand {
     #[command(subcommand)]
     command: PackageSubcommand,
@@ -182,7 +224,7 @@ struct PackageBuildCommand {
     quiet: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 struct SingleInput {
     #[arg(long)]
     file: Option<PathBuf>,
@@ -297,6 +339,7 @@ fn run(cli: Cli) -> Result<RunResult, CliError> {
         Command::Compile(command) => run_compile(command),
         Command::Evaluate(command) => run_evaluate(command),
         Command::Query(command) => run_query(command),
+        Command::Reason(command) => run_reason(command),
         Command::Lint(command) => run_lint(command),
         Command::Package(command) => run_package(command),
         Command::Project(command) => run_project(command),
@@ -481,6 +524,44 @@ fn run_query(command: QueryCommand) -> Result<RunResult, CliError> {
 
     Ok(RunResult {
         exit_code: 0,
+        stdout,
+    })
+}
+
+fn run_reason(command: ReasonCommand) -> Result<RunResult, CliError> {
+    match command.command {
+        ReasonSubcommand::Capabilities(command) => run_reason_capabilities(command),
+        ReasonSubcommand::RequirementCoverage(command) => run_requirement_coverage(command),
+    }
+}
+
+fn run_reason_capabilities(command: ReasonCapabilitiesCommand) -> Result<RunResult, CliError> {
+    let capabilities = builtin_reasoning_capabilities();
+    let stdout = match command.format {
+        OutputFormat::Json => to_pretty_json(&capabilities)?,
+        OutputFormat::Text => format_reason_capabilities_text(&capabilities),
+    };
+
+    Ok(RunResult {
+        exit_code: 0,
+        stdout,
+    })
+}
+
+fn run_requirement_coverage(command: RequirementCoverageCommand) -> Result<RunResult, CliError> {
+    let model = read_requirement_coverage_model_input(&command)?;
+    let runtime = Runtime::from_document(model.document)
+        .map_err(|err| CliError::execution(format!("failed to build runtime: {err}")))?;
+    let context = cli_semantic_context(&model.source, "requirement_coverage", &runtime);
+    let report = analyze_requirement_coverage(&runtime, context, "cli.requirement_coverage");
+    let failed = report.status != ReasoningStatus::Passed;
+    let stdout = match command.format {
+        OutputFormat::Json => to_pretty_json(&report)?,
+        OutputFormat::Text => format_requirement_coverage_text(&report),
+    };
+
+    Ok(RunResult {
+        exit_code: if failed { 1 } else { 0 },
         stdout,
     })
 }
@@ -874,6 +955,45 @@ fn read_query_model_input(command: &QueryCommand) -> Result<QueryModelInput, Cli
         project_descriptor: library_context.project_descriptor_output(),
         document,
     })
+}
+
+fn read_requirement_coverage_model_input(
+    command: &RequirementCoverageCommand,
+) -> Result<QueryModelInput, CliError> {
+    let query_command = QueryCommand {
+        input: command.input.clone(),
+        kir: command.kir.clone(),
+        kpar: command.kpar.clone(),
+        query: Some("from elements select id limit 1".to_string()),
+        query_file: None,
+        language: command.language,
+        format: command.format,
+        stdlib: command.stdlib.clone(),
+    };
+    read_query_model_input(&query_command)
+}
+
+fn cli_semantic_context(source: &str, operation: &str, runtime: &Runtime) -> SemanticContextRef {
+    SemanticContextRef {
+        context_id: format!("cli.{operation}"),
+        kind: SemanticContextKind::Accepted,
+        artifact: SemanticArtifactRef {
+            artifact_key: runtime_artifact_digest(runtime),
+            kir_schema_version: mercurio_core::KIR_SCHEMA_VERSION.to_string(),
+            source_authority: Some("cli".to_string()),
+            source_revision: Some(source.to_string()),
+        },
+    }
+}
+
+fn runtime_artifact_digest(runtime: &Runtime) -> String {
+    let encoded = serde_json::to_string(&runtime.artifact()).unwrap_or_default();
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in encoded.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64_{hash:016x}")
 }
 
 fn read_query_text(command: &QueryCommand) -> Result<String, CliError> {
@@ -1731,6 +1851,48 @@ struct QueryResponse {
     result: QueryResultSet,
 }
 
+fn format_requirement_coverage_text(report: &ReasoningReport) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("status: {:?}\n", report.status));
+    output.push_str(&format!("capability: {}\n", report.capability.id));
+    output.push_str(&format!("context: {}\n", report.context.context_id));
+    if let Some(summary) = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.kind == "requirement_coverage_summary")
+    {
+        output.push_str(&format!(
+            "requirements: {}\n",
+            summary.payload["requirementCount"]
+        ));
+        output.push_str(&format!(
+            "satisfied: {}\n",
+            summary.payload["satisfiedCount"]
+        ));
+        output.push_str(&format!("verified: {}\n", summary.payload["verifiedCount"]));
+    }
+    output.push_str(&format!("findings: {}\n", report.findings.len()));
+    for finding in &report.findings {
+        output.push_str(&format!(
+            "- {:?}: {} ({})\n",
+            finding.severity, finding.title, finding.id
+        ));
+        output.push_str(&format!("  {}\n", finding.message));
+    }
+    output
+}
+
+fn format_reason_capabilities_text(capabilities: &[CapabilityDescriptor]) -> String {
+    let mut output = String::new();
+    for capability in capabilities {
+        output.push_str(&format!(
+            "{}\t{:?}\t{}\tdeterministic={}\n",
+            capability.id, capability.kind, capability.version, capability.deterministic
+        ));
+    }
+    output
+}
+
 fn format_parse_text(response: &ParseResponse) -> String {
     let mut output = String::new();
     output.push_str(&format!("source: {}\n", response.source));
@@ -2522,6 +2684,47 @@ mod tests {
         assert!(result.stdout.contains("rows: 2"));
         assert!(result.stdout.contains("type.Demo.VehicleNeed"));
         assert!(result.stdout.contains("requirement.Demo.vehicleNeed"));
+    }
+
+    #[test]
+    fn reason_requirement_coverage_reports_json_findings() {
+        let path = mercurio_core::repo_path("examples/requirements_table_model.json");
+        let result = run_args(&[
+            "reason",
+            "requirement-coverage",
+            "--kir",
+            path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .unwrap();
+
+        assert_eq!(result.exit_code, 1);
+        let json: serde_json::Value = serde_json::from_str(&result.stdout).unwrap();
+        assert_eq!(json["status"], "failed");
+        assert_eq!(json["capability"]["id"], "mercurio.requirement.coverage");
+        assert_eq!(
+            json["artifacts"][0]["payload"]["requirementCount"],
+            serde_json::Value::from(3)
+        );
+        assert!(json["findings"].as_array().unwrap().iter().any(|finding| {
+            finding["id"]
+                .as_str()
+                .unwrap()
+                .contains("verify.missing.req.VehicleSafety.DriverAlert")
+        }));
+    }
+
+    #[test]
+    fn reason_capabilities_lists_requirement_coverage() {
+        let result = run_args(&["reason", "capabilities", "--format", "json"]).unwrap();
+
+        assert_eq!(result.exit_code, 0);
+        let json: serde_json::Value = serde_json::from_str(&result.stdout).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 1);
+        assert_eq!(json[0]["id"], "mercurio.requirement.coverage");
+        assert_eq!(json[0]["kind"], "requirement_coverage");
+        assert_eq!(json[0]["deterministic"], true);
     }
 
     #[test]

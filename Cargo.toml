@@ -1,6 +1,9 @@
 [workspace]
 members = [
     "crates/mercurio-core",
+    "crates/mercurio-reasoner-api",
+    "crates/mercurio-plugin-api",
+    "crates/mercurio-reference-capabilities",
     "crates/mercurio-ai",
     "crates/mercurio-cli",
     "crates/mercurio-python",

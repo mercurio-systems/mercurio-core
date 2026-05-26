@@ -2,9 +2,9 @@
 
 ## Overview
 
-The public CLI is one cohesive `mercurio` binary with `project`, `parse`, `compile`, `query`, `evaluate`, `lint`, `package`, and `completions` subcommands.
+The public CLI is one cohesive `mercurio` binary with `project`, `parse`, `compile`, `query`, `evaluate`, `reason`, `lint`, `package`, and `completions` subcommands.
 
-`parse`, `compile`, `query`, and `evaluate` can read source input from:
+`parse`, `compile`, `query`, `evaluate`, and `reason requirement-coverage` can read source input from:
 
 - `--file PATH`
 - `--text TEXT`
@@ -82,6 +82,27 @@ Compile source from a network URL:
 
 ```powershell
 mercurio compile --url https://example.com/models/vehicle.sysml
+```
+
+## Reason Over Requirements
+
+List deterministic built-in reasoning capabilities:
+
+```powershell
+mercurio reason capabilities --format json
+```
+
+Run the deterministic requirement coverage capability over KIR:
+
+```powershell
+mercurio reason requirement-coverage --kir examples/requirements_table_model.json --format json
+```
+
+The command returns a `ReasoningReport` with capability metadata, pass/fail status, findings,
+evidence nodes, and a requirement coverage summary artifact. It can also compile source directly:
+
+```powershell
+mercurio reason requirement-coverage --file model.sysml
 ```
 
 ## Lint SysML Or KerML

@@ -823,6 +823,8 @@ dependencies = [
  "clap",
  "clap_complete",
  "mercurio-core",
+ "mercurio-reasoner-api",
+ "mercurio-reference-capabilities",
  "reqwest",
  "serde",
  "serde_json",
@@ -838,11 +840,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "mercurio-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "mercurio-reasoner-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mercurio-python"
 version = "0.1.0"
 dependencies = [
  "mercurio-core",
  "pyo3",
+ "serde_json",
+]
+
+[[package]]
+name = "mercurio-reasoner-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mercurio-reference-capabilities"
+version = "0.1.0"
+dependencies = [
+ "mercurio-core",
+ "mercurio-reasoner-api",
  "serde_json",
 ]
 

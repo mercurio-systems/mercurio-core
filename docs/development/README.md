@@ -20,6 +20,19 @@ These are the highest-level documents. Other plans should reinforce these bounda
 - [Semantic Artifact Keys](SEMANTIC_ARTIFACT_KEYS.md): shared cache/evidence key model for compiled and derived semantic artifacts.
 - [Proposal And Draft Overlay Lifecycle](PROPOSAL_DRAFT_LIFECYCLE.md): shared lifecycle for drafts, proposals, overlays, and PR bindings.
 
+Public reasoning service contracts live in `crates/mercurio-reasoner-api`. That crate defines DTOs
+for semantic contexts, capabilities, findings, artifacts, and evidence graphs without implementing
+private reasoning services or product workflow.
+
+Public plugin contracts live in `crates/mercurio-plugin-api`. That crate defines manifest,
+permission, service, verification-action, and capability-declaration DTOs without implementing
+plugin discovery, installation, sandboxing, or execution.
+
+Open deterministic reference capabilities live in `crates/mercurio-reference-capabilities`. The
+first reference capability is requirement coverage, which turns the core requirements view and
+derived indexes into a `ReasoningReport` without adding orchestration, plugins, or private services
+to the semantic kernel crate.
+
 ## Active Runtime And Semantic-Service Architecture
 
 These describe services downstream of compiled KIR. They should not redefine source authority or the KIR contract.
