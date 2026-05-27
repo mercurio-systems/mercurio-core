@@ -12,8 +12,6 @@ path = "src/main.rs"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
 mercurio-core = { path = "../mercurio-core" }
-mercurio-reference-capabilities = { path = "../mercurio-reference-capabilities" }
-mercurio-reasoner-api = { path = "../mercurio-reasoner-api" }
 reqwest = { workspace = true, features = ["blocking"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

@@ -2,9 +2,9 @@
 
 ## Overview
 
-The public CLI is one cohesive `mercurio` binary with `project`, `parse`, `compile`, `query`, `evaluate`, `reason`, `lint`, `package`, and `completions` subcommands.
+The public CLI is one cohesive `mercurio` binary with `project`, `parse`, `compile`, `query`, `evaluate`, `state-machine`, `lint`, `package`, and `completions` subcommands.
 
-`parse`, `compile`, `query`, `evaluate`, and `reason requirement-coverage` can read source input from:
+`parse`, `compile`, `query`, `evaluate`, and `state-machine` commands can read source input from:
 
 - `--file PATH`
 - `--text TEXT`
@@ -84,26 +84,21 @@ Compile source from a network URL:
 mercurio compile --url https://example.com/models/vehicle.sysml
 ```
 
-## Reason Over Requirements
+## State Machine Projection And Execution
 
-List deterministic built-in reasoning capabilities:
-
-```powershell
-mercurio reason capabilities --format json
-```
-
-Run the deterministic requirement coverage capability over KIR:
+Project state machines from KIR:
 
 ```powershell
-mercurio reason requirement-coverage --kir examples/requirements_table_model.json --format json
+mercurio state-machine projection --kir examples/state_machine_model.json --format json
 ```
 
-The command returns a `ReasoningReport` with capability metadata, pass/fail status, findings,
-evidence nodes, and a requirement coverage summary artifact. It can also compile source directly:
+Run a state machine scenario from source:
 
 ```powershell
-mercurio reason requirement-coverage --file model.sysml
+mercurio state-machine run --file "examples/src/training/25. Transitions/Local Clock Example.sysml" --machine ServerBehavior --event Start --event request --format json
 ```
+
+Higher-level reasoning capabilities, such as requirement coverage reports, live in the sibling `mercurio-reasoning` repository.
 
 ## Lint SysML Or KerML
 

@@ -16,10 +16,10 @@ KIR + parser + compiler + stdlib + deterministic graph/query/runtime
 | `crates/mercurio-wasm` | `mercurio-core` | `mercurio-wasm` | keep, core bindings only |
 | `crates/mercurio-python` | `mercurio-core` | `mercurio-python` | keep, core bindings only |
 | `crates/mercurio-tools` | `mercurio-core` | `mercurio-tools` or `xtask` | keep temporarily; split public audit tools from migration-only tools |
-| `crates/mercurio-reasoner-api` | `mercurio-reasoning` | `mercurio-reasoner-api` | move |
-| `crates/mercurio-plugin-api` | `mercurio-reasoning` | `mercurio-plugin-api` | move |
-| `crates/mercurio-reference-capabilities` | `mercurio-reasoning` | `mercurio-reference-capabilities` | move |
-| `crates/mercurio-ai` | `mercurio-reasoning` or `mercurio-product` | `mercurio-ai-orchestration` | move |
+| `crates/mercurio-reasoner-api` | `mercurio-reasoning` | `mercurio-reasoner-api` | moved |
+| `crates/mercurio-plugin-api` | `mercurio-reasoning` | `mercurio-plugin-api` | moved |
+| `crates/mercurio-reference-capabilities` | `mercurio-reasoning` | `mercurio-reference-capabilities` | moved |
+| `crates/mercurio-ai` | `mercurio-reasoning` or `mercurio-product` | `mercurio-ai-orchestration` | moved |
 
 ## Current `mercurio-core` Module Classification
 
@@ -79,10 +79,9 @@ Run the non-strict check during the transition:
 cargo run -p mercurio-tools --bin check_repo_boundaries
 ```
 
-This permits known migration crates while failing on unclassified crates or root
-directories that belong in peer repositories.
+This fails on unclassified crates or root directories that belong in peer repositories.
 
-Run the strict check once the reasoning/API/plugin/AI crates have moved:
+Run the strict check to also fail if any transitional migration crates are added back:
 
 ```powershell
 cargo run -p mercurio-tools --bin check_repo_boundaries -- --strict

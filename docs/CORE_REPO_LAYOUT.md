@@ -243,16 +243,15 @@ Do not own:
 - AI orchestration
 - private simulation backends
 
-## Move Out Of Core
+## Moved Out Of Core
 
-The following current crates or modules should leave the open core repository or be
-split so only their KIR/runtime-neutral pieces remain:
+The following crates have moved to the sibling `mercurio-reasoning` repository:
 
 ```text
-crates/mercurio-ai
-crates/mercurio-plugin-api
-crates/mercurio-reasoner-api
-crates/mercurio-reference-capabilities
+mercurio-reasoning/crates/mercurio-ai
+mercurio-reasoning/crates/mercurio-plugin-api
+mercurio-reasoning/crates/mercurio-reasoner-api
+mercurio-reasoning/crates/mercurio-reference-capabilities
 ```
 
 Reasoning and simulation material should move to a separate repository:
@@ -326,10 +325,10 @@ crates/mercurio-core/src/feasibility.rs
 crates/mercurio-core/src/goal.rs
 crates/mercurio-core/src/mutation.rs
 crates/mercurio-core/src/proposal.rs
-crates/mercurio-reference-capabilities/
-crates/mercurio-reasoner-api/
-crates/mercurio-plugin-api/
-crates/mercurio-ai/
+mercurio-reasoning/crates/mercurio-reference-capabilities/
+mercurio-reasoning/crates/mercurio-reasoner-api/
+mercurio-reasoning/crates/mercurio-plugin-api/
+mercurio-reasoning/crates/mercurio-ai/
 ```
 
 Some of these contain useful deterministic substrate. The rule is:

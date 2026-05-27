@@ -6,12 +6,7 @@
     "mercurio-tools",
     "mercurio-wasm"
   ],
-  "known_migration_crates": [
-    "mercurio-ai",
-    "mercurio-plugin-api",
-    "mercurio-reasoner-api",
-    "mercurio-reference-capabilities"
-  ],
+  "known_migration_crates": [],
   "forbidden_root_dirs": [
     "apps",
     "services",

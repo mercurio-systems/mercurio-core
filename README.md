@@ -16,24 +16,19 @@ The goal of this repository is to make the modeling kernel useful on its own: pa
 ## What Lives Here
 
 - `mercurio-core` parses, compiles, lints, loads libraries, builds runtime graphs, and computes derived values.
-- `mercurio-reasoner-api` defines product-neutral reasoning, capability, finding, and evidence DTOs for services and plugins.
-- `mercurio-plugin-api` defines product-neutral plugin manifests, permissions, service declarations, and capability declarations.
-- `mercurio-reference-capabilities` contains open deterministic reference capabilities built on core semantics.
-- `mercurio-ai` contains provider adapters and semantic agent workflows that depend on core mutation, feasibility, and goal contracts without becoming part of the core library crate.
 - `mercurio-cli` provides the public `mercurio` command for parse, compile, lint, query, evaluate, and package workflows.
 - `mercurio-tools` contains maintainer tools for diagnostics, benchmarks, demos, and Pilot comparison/export workflows.
 - `resources/` contains bundled runtime and standard library artifacts.
 - `examples/` and `fixtures/` provide SysML, KerML, and KIR models for tests and demonstrations.
 
-The hosted product, UI, and privileged console API live in the private `mercurio-product` repository. They depend on `mercurio-core` for domain behavior.
+Reasoning APIs, plugin contracts, deterministic reference capabilities, and AI orchestration live in the sibling `mercurio-reasoning` repository. The hosted product, UI, and privileged console API live in the private `mercurio-product` repository. They depend on `mercurio-core` for domain behavior.
 
 ## Core Concepts
 
 - Source languages: Mercurio reads `.sysml` and `.kerml` files. Inline CLI text defaults to SysML unless `--language kerml` is provided.
-- KIR: Mercurio's validated semantic JSON format, used by graph queries, derived values, requirements views, package loading, and product hosts.
+- KIR: Mercurio's validated semantic JSON format, used by graph queries, derived values, projections, package loading, and product hosts.
 - Standard library: semantic compilation and linting use the bundled default standard library unless a command is given `--stdlib PATH`.
 - KPAR packages: source-backed zip packages containing SysML/KerML sources plus package metadata.
-- Reasoning reports: deterministic reference capabilities can return product-neutral findings and evidence through `mercurio-reasoner-api`; the first reference capability is requirement coverage.
 
 ## Requirements
 
@@ -86,9 +81,6 @@ mercurio parse --text "package Demo { part def Vehicle; }"
 
 - `Cargo.toml` - workspace manifest
 - `crates/mercurio-core/` - library crate
-- `crates/mercurio-reasoner-api/` - product-neutral reasoning service contracts
-- `crates/mercurio-plugin-api/` - product-neutral plugin manifest and capability contracts
-- `crates/mercurio-reference-capabilities/` - open deterministic reference capabilities over core semantics
 - `crates/mercurio-cli/` - public command-line binary
 - `crates/mercurio-tools/` - maintainer diagnostics, benchmarks, demos, and Pilot comparison tools
 - `crates/mercurio-core/src/frontend/` - SysML, KerML, linting, formatting, and resolver code

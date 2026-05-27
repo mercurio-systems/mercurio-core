@@ -42,7 +42,7 @@ Check that crates and root directories are classified by the core repository bou
 cargo run -p mercurio-tools --bin check_repo_boundaries
 ```
 
-Use `--strict` after the known migration crates have moved out of `mercurio-core`.
+Use `--strict` to fail if transitional migration crates are added back to `mercurio-core`.
 
 ## Diagnose Example Corpus
 
