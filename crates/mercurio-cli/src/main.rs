@@ -225,6 +225,7 @@ enum PackageSubcommand {
     Build(PackageBuildCommand),
     List(PackageListCommand),
     Inspect(PackageInspectCommand),
+    Verify(PackageVerifyCommand),
     Compile(PackageCompileCommand),
     Publish(PackagePublishCommand),
     Pull(PackagePullCommand),
@@ -263,6 +264,17 @@ struct PackageInspectCommand {
     version: String,
     #[arg(long)]
     repo: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct PackageVerifyCommand {
+    name: String,
+    #[arg(long)]
+    version: String,
+    #[arg(long)]
+    repo: Option<PathBuf>,
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    format: OutputFormat,
 }
 
 #[derive(Debug, Args)]
@@ -703,6 +715,7 @@ fn run_package(command: PackageCommand) -> Result<RunResult, CliError> {
         PackageSubcommand::Build(command) => run_package_build(command),
         PackageSubcommand::List(command) => run_package_list(command),
         PackageSubcommand::Inspect(command) => run_package_inspect(command),
+        PackageSubcommand::Verify(command) => run_package_verify(command),
         PackageSubcommand::Compile(command) => run_package_compile(command),
         PackageSubcommand::Publish(command) => run_package_publish(command),
         PackageSubcommand::Pull(command) => run_package_pull(command),
@@ -977,6 +990,34 @@ fn run_package_inspect(command: PackageInspectCommand) -> Result<RunResult, CliE
     let stdout = serde_json::to_string_pretty(&manifest)
         .map(|json| format!("{json}\n"))
         .map_err(|err| CliError::execution(format!("failed to render manifest: {err}")))?;
+    Ok(RunResult {
+        exit_code: 0,
+        stdout,
+    })
+}
+
+fn run_package_verify(command: PackageVerifyCommand) -> Result<RunResult, CliError> {
+    let repo = package_repo(command.repo);
+    let verification = repo
+        .verify_package(&command.name, &command.version)
+        .map_err(|err| CliError::execution(format!("failed to verify package: {err}")))?;
+    let stdout = match command.format {
+        OutputFormat::Json => to_pretty_json(&verification)?,
+        OutputFormat::Text => format!(
+            "status: ok\npackage: {}:{}\nrepo: {}\nfile: {}\ndigest: {}\nsources: {}\nprecompiled_kir: {}\nelements: {}\n",
+            verification.name,
+            verification.version,
+            repo.root().display(),
+            verification.file,
+            verification.digest,
+            verification.source_count,
+            verification.has_precompiled_kir,
+            verification
+                .precompiled_kir_element_count
+                .map(|count| count.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
+        ),
+    };
     Ok(RunResult {
         exit_code: 0,
         stdout,
@@ -3349,6 +3390,30 @@ mod tests {
         assert_eq!(artifact.document.elements[0].id, "type.Stdlib.Thing");
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn package_verify_checks_bundled_stdlib_package() {
+        let repo = mercurio_core::bundled_package_repo_path();
+        let result = run_args(&[
+            "package",
+            "verify",
+            "org.omg/sysml-stdlib",
+            "--version",
+            "2.0.0",
+            "--repo",
+            repo.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.contains("status: ok"));
+        assert!(
+            result
+                .stdout
+                .contains("package: org.omg/sysml-stdlib:2.0.0")
+        );
+        assert!(result.stdout.contains("precompiled_kir: true"));
     }
 
     #[test]

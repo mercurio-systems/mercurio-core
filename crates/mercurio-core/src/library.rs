@@ -104,6 +104,19 @@ pub struct LocalPackageManifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PackageVerification {
+    pub name: String,
+    pub version: String,
+    pub file: String,
+    pub digest: String,
+    pub project_name: Option<String>,
+    pub project_version: Option<String>,
+    pub source_count: usize,
+    pub has_precompiled_kir: bool,
+    pub precompiled_kir_element_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocalPackageSource {
     pub kind: String,
     pub path: String,
@@ -674,6 +687,58 @@ impl LocalPackageRepository {
         let manifest_path = self.manifest_path(name, version);
         let input = std::fs::read_to_string(&manifest_path)?;
         serde_json::from_str(&input).map_err(KirError::Json)
+    }
+
+    pub fn verify_package(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<PackageVerification, KirError> {
+        let manifest = self.read_manifest(name, version)?;
+        if manifest.name != name || manifest.version != version {
+            return Err(KirError::Sysml(format!(
+                "package manifest identity mismatch: expected {name}:{version}, got {}:{}",
+                manifest.name, manifest.version
+            )));
+        }
+        if manifest.kind != "kpar" {
+            return Err(KirError::Sysml(format!(
+                "unsupported package kind '{}'",
+                manifest.kind
+            )));
+        }
+        let Some(package_path) = self.find_package(name, version)? else {
+            return Err(KirError::Sysml(format!(
+                "package {name} version {version} was not found in {}",
+                self.root.display()
+            )));
+        };
+        let archive = verify_kpar_archive(&package_path)?;
+        if let Some(project_name) = &archive.project_name
+            && project_name != name
+        {
+            return Err(KirError::Sysml(format!(
+                "package project name mismatch: manifest has {name}, archive has {project_name}"
+            )));
+        }
+        if let Some(project_version) = &archive.project_version
+            && project_version != version
+        {
+            return Err(KirError::Sysml(format!(
+                "package project version mismatch: manifest has {version}, archive has {project_version}"
+            )));
+        }
+        Ok(PackageVerification {
+            name: manifest.name,
+            version: manifest.version,
+            file: manifest.file,
+            digest: manifest.digest,
+            project_name: archive.project_name,
+            project_version: archive.project_version,
+            source_count: archive.source_count,
+            has_precompiled_kir: archive.has_precompiled_kir,
+            precompiled_kir_element_count: archive.precompiled_kir_element_count,
+        })
     }
 
     pub fn stage_kpar(
@@ -1283,6 +1348,70 @@ fn collect_kpar_source_files(
 ) -> Result<(Vec<SourceDocument>, Option<KparProjectMetadata>), KirError> {
     let content = collect_kpar_archive_content(path)?;
     Ok((content.source_files, content.package_metadata))
+}
+
+struct KparArchiveVerification {
+    project_name: Option<String>,
+    project_version: Option<String>,
+    source_count: usize,
+    has_precompiled_kir: bool,
+    precompiled_kir_element_count: Option<usize>,
+}
+
+fn verify_kpar_archive(path: &Path) -> Result<KparArchiveVerification, KirError> {
+    let file = std::fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(zip_error_to_kir_error)?;
+    let mut package_metadata = None;
+    let mut source_count = 0usize;
+    let mut precompiled_kir_element_count = None;
+
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(zip_error_to_kir_error)?;
+        if !entry.is_file() {
+            continue;
+        }
+
+        let entry_name = entry.name().replace('\\', "/");
+        if entry_name == ".project.json" {
+            let mut content = String::new();
+            entry.read_to_string(&mut content)?;
+            package_metadata = Some(serde_json::from_str::<KparProjectMetadata>(&content)?);
+            continue;
+        }
+
+        if entry_name == KPAR_PRECOMPILED_KIR_ENTRY {
+            let mut content = String::new();
+            entry.read_to_string(&mut content)?;
+            let document = serde_json::from_str::<KirDocument>(&content)?;
+            precompiled_kir_element_count = Some(document.elements.len());
+            continue;
+        }
+
+        if is_library_archive_source_entry(&entry_name) {
+            source_count += 1;
+        }
+    }
+
+    let Some(package_metadata) = package_metadata else {
+        return Err(KirError::Sysml(format!(
+            "KPAR package {} is missing .project.json",
+            path.display()
+        )));
+    };
+    if source_count == 0 && precompiled_kir_element_count.is_none() {
+        return Err(KirError::Sysml(format!(
+            "KPAR package {} contains no source files or precompiled KIR document",
+            path.display()
+        )));
+    }
+
+    Ok(KparArchiveVerification {
+        project_name: package_metadata.name,
+        project_version: package_metadata.version,
+        source_count,
+        has_precompiled_kir: precompiled_kir_element_count.is_some(),
+        precompiled_kir_element_count,
+    })
 }
 
 fn build_kpar_package_index(path: &Path) -> Result<KparPackageIndex, KirError> {
@@ -2000,6 +2129,49 @@ mod tests {
         .unwrap();
 
         assert_eq!(artifact.document.elements[0].id, "type.Stdlib.Thing");
+
+        std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
+    fn local_package_repository_verifies_kir_only_package() {
+        let temp_root =
+            std::env::temp_dir().join(format!("mercurio-package-verify-{}", std::process::id()));
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let source_path = temp_root.join("stdlib.kpar");
+        let repo = super::LocalPackageRepository::new(temp_root.join("repo"));
+        let document = KirDocument {
+            metadata: BTreeMap::new(),
+            elements: vec![KirElement {
+                id: "type.Stdlib.Thing".to_string(),
+                kind: "PartDefinition".to_string(),
+                layer: 2,
+                properties: BTreeMap::new(),
+            }],
+        };
+
+        write_kpar_package(
+            &source_path,
+            &KparPackageBuild {
+                name: "org.omg/sysml-stdlib".to_string(),
+                version: Some("2.0.0".to_string()),
+                precompiled_kir: Some(document),
+                sources: Vec::new(),
+            },
+        )
+        .unwrap();
+        repo.stage_kpar(&source_path, "org.omg/sysml-stdlib", "2.0.0", None)
+            .unwrap();
+
+        let verification = repo
+            .verify_package("org.omg/sysml-stdlib", "2.0.0")
+            .unwrap();
+
+        assert_eq!(verification.name, "org.omg/sysml-stdlib");
+        assert_eq!(verification.version, "2.0.0");
+        assert_eq!(verification.source_count, 0);
+        assert!(verification.has_precompiled_kir);
+        assert_eq!(verification.precompiled_kir_element_count, Some(1));
 
         std::fs::remove_dir_all(temp_root).unwrap();
     }

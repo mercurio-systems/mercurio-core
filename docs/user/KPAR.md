@@ -107,6 +107,14 @@ Inspect a staged package:
 mercurio package inspect domain-lib --version 0.1.0
 ```
 
+Verify a staged package:
+
+```powershell
+mercurio package verify domain-lib --version 0.1.0
+```
+
+Verification checks the local manifest, package digest, `.project.json`, source/precompiled payload presence, and parses `document.kir.json` when present.
+
 Compile a staged package:
 
 ```powershell
