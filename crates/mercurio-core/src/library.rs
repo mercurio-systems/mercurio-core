@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::ir::{KirDocument, KirError};
 use crate::paths::{
     bundled_package_repo_path, default_package_kir_cache_path, default_package_repo_path,
-    default_stdlib_path,
+    default_stdlib_path, default_user_config_path,
 };
 
 pub const DEFAULT_STDLIB_LOCATOR: &str = "kpar:org.omg/sysml-stdlib:2.0.0";
@@ -108,6 +108,12 @@ pub struct LocalPackageSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalPackageRepository {
     root: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct UserPackageConfig {
+    #[serde(default)]
+    pub package_repositories: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -279,10 +285,7 @@ impl LibraryProviderConfig {
                     )));
                 };
 
-                for repo in [
-                    LocalPackageRepository::default_user(),
-                    LocalPackageRepository::bundled(),
-                ] {
+                for repo in LocalPackageRepository::resolution_repositories() {
                     if let Some(source_path) = repo.find_package(name, version)? {
                         let fallback_context = KirDocument::from_path(&default_stdlib_path())?;
                         let context_document = library_context.unwrap_or(&fallback_context);
@@ -436,10 +439,7 @@ impl LibraryProviderConfig {
                     )));
                 };
 
-                for repo in [
-                    LocalPackageRepository::default_user(),
-                    LocalPackageRepository::bundled(),
-                ] {
+                for repo in LocalPackageRepository::resolution_repositories() {
                     if let Some(source_path) = repo.find_package(name, version)? {
                         return Ok(LibrarySourceFingerprint {
                             library_id: library_id.to_string(),
@@ -501,6 +501,42 @@ fn resolve_provider_path(path: &str, base_dir: Option<&Path>) -> PathBuf {
     }
 }
 
+fn configured_package_repository_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(value) = std::env::var("MERCURIO_PACKAGE_REPOSITORIES") {
+        paths.extend(split_package_repository_list(&value));
+    }
+
+    let config_path = default_user_config_path();
+    if config_path.is_file()
+        && let Ok(input) = std::fs::read_to_string(&config_path)
+        && let Ok(config) = serde_json::from_str::<UserPackageConfig>(&input)
+    {
+        paths.extend(
+            config
+                .package_repositories
+                .into_iter()
+                .filter(|path| !path.trim().is_empty())
+                .map(PathBuf::from),
+        );
+    }
+
+    let mut seen = BTreeSet::new();
+    paths
+        .into_iter()
+        .filter(|path| seen.insert(path.display().to_string()))
+        .collect()
+}
+
+fn split_package_repository_list(value: &str) -> Vec<PathBuf> {
+    value
+        .split(';')
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
 pub fn load_baseline_library_document() -> Result<KirDocument, KirError> {
     Ok(BaselineLibraryConfig::bundled_stdlib().resolve()?.document)
 }
@@ -512,6 +548,21 @@ impl LocalPackageRepository {
 
     pub fn bundled() -> Self {
         Self::new(bundled_package_repo_path())
+    }
+
+    pub fn configured() -> Vec<Self> {
+        configured_package_repository_paths()
+            .into_iter()
+            .map(Self::new)
+            .collect()
+    }
+
+    pub fn resolution_repositories() -> Vec<Self> {
+        let mut repositories = Vec::new();
+        repositories.push(Self::default_user());
+        repositories.extend(Self::configured());
+        repositories.push(Self::bundled());
+        repositories
     }
 
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -1826,6 +1877,104 @@ mod tests {
                 .elements
                 .iter()
                 .any(|element| element.id == "type.Cached.Thing")
+        );
+
+        std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
+    fn kpar_locator_resolves_from_configured_repository_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_root = std::env::temp_dir().join(format!(
+            "mercurio-kpar-configured-repo-env-{}",
+            std::process::id()
+        ));
+        let published_repo = temp_root.join("published");
+        let repo = super::LocalPackageRepository::new(&published_repo);
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let source_path = temp_root.join("source.kpar");
+        write_test_kpar(
+            &source_path,
+            "Domain Library",
+            "1.2.3",
+            &[("domain.sysml", "package Domain {\n  part def Thing;\n}\n")],
+        );
+        repo.stage_kpar(&source_path, "domain-lib", "1.2.3", None)
+            .unwrap();
+
+        unsafe {
+            std::env::remove_var("MERCURIO_PACKAGE_REPO");
+            std::env::set_var("MERCURIO_PACKAGE_REPOSITORIES", &published_repo);
+        }
+        let artifact = LibraryProviderConfig::KparLocator {
+            locator: "kpar:domain-lib:1.2.3".to_string(),
+        }
+        .resolve("domain-lib")
+        .unwrap();
+        unsafe {
+            std::env::remove_var("MERCURIO_PACKAGE_REPOSITORIES");
+        }
+
+        assert!(
+            artifact
+                .document
+                .elements
+                .iter()
+                .any(|element| element.id == "type.Domain.Thing")
+        );
+
+        std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
+    fn kpar_locator_resolves_from_user_config_repository() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_root = std::env::temp_dir().join(format!(
+            "mercurio-kpar-configured-repo-file-{}",
+            std::process::id()
+        ));
+        let published_repo = temp_root.join("published");
+        let config_path = temp_root.join("config.json");
+        let repo = super::LocalPackageRepository::new(&published_repo);
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let source_path = temp_root.join("source.kpar");
+        write_test_kpar(
+            &source_path,
+            "Domain Library",
+            "1.2.3",
+            &[("domain.sysml", "package Domain {\n  part def Thing;\n}\n")],
+        );
+        repo.stage_kpar(&source_path, "domain-lib", "1.2.3", None)
+            .unwrap();
+        std::fs::write(
+            &config_path,
+            serde_json::json!({
+                "package_repositories": [published_repo.display().to_string()]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::remove_var("MERCURIO_PACKAGE_REPO");
+            std::env::remove_var("MERCURIO_PACKAGE_REPOSITORIES");
+            std::env::set_var("MERCURIO_CONFIG_PATH", &config_path);
+        }
+        let artifact = LibraryProviderConfig::KparLocator {
+            locator: "kpar:domain-lib:1.2.3".to_string(),
+        }
+        .resolve("domain-lib")
+        .unwrap();
+        unsafe {
+            std::env::remove_var("MERCURIO_CONFIG_PATH");
+        }
+
+        assert!(
+            artifact
+                .document
+                .elements
+                .iter()
+                .any(|element| element.id == "type.Domain.Thing")
         );
 
         std::fs::remove_dir_all(temp_root).unwrap();
