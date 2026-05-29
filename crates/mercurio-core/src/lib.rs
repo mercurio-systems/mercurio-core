@@ -148,7 +148,7 @@ pub use plugin_registry::{
 };
 pub use project::{
     PROJECT_DESCRIPTOR_FILE_NAME, ProjectDescriptor, ProjectDescriptorError, ProjectLibraryConfig,
-    ProjectLibraryRole, ResolvedProjectContext, ResolvedProjectLibrary,
+    ProjectLibraryRole, ProjectPluginConfig, ResolvedProjectContext, ResolvedProjectLibrary,
     discover_project_descriptor_path, resolve_project_context,
 };
 pub use project_cache::{

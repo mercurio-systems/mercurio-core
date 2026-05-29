@@ -26,6 +26,8 @@ pub struct ProjectDescriptor {
     pub name: Option<String>,
     #[serde(default)]
     pub libraries: Vec<ProjectLibraryConfig>,
+    #[serde(default)]
+    pub plugins: Vec<ProjectPluginConfig>,
 }
 
 #[derive(Debug)]
@@ -63,6 +65,17 @@ pub struct ProjectLibraryConfig {
     pub locator: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<LibraryProviderConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectPluginConfig {
+    pub id: String,
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locator: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -612,6 +625,32 @@ mod tests {
 
         assert_eq!(descriptor.version, 1);
         assert!(descriptor.libraries.is_empty());
+        assert!(descriptor.plugins.is_empty());
+    }
+
+    #[test]
+    fn project_descriptor_accepts_plugin_pins() {
+        let descriptor: ProjectDescriptor = serde_json::from_str(
+            r#"{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "org.mercurio.samples.wasm-echo",
+      "version": "0.1.0",
+      "locator": "mpack:org.mercurio.samples.wasm-echo:0.1.0",
+      "digest": "fnv1a64:sample"
+    }
+  ]
+}"#,
+        )
+        .unwrap();
+
+        assert_eq!(descriptor.plugins.len(), 1);
+        assert_eq!(descriptor.plugins[0].id, "org.mercurio.samples.wasm-echo");
+        assert_eq!(
+            descriptor.plugins[0].locator.as_deref(),
+            Some("mpack:org.mercurio.samples.wasm-echo:0.1.0")
+        );
     }
 
     #[test]

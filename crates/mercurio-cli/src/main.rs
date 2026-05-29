@@ -164,6 +164,8 @@ enum PluginSubcommand {
 #[derive(Debug, Args)]
 struct PluginInstallCommand {
     manifest: PathBuf,
+    #[arg(long = "from")]
+    from: Option<String>,
     #[arg(long)]
     root: Option<PathBuf>,
     #[arg(long)]
@@ -802,6 +804,7 @@ fn run_project_new(command: ProjectNewCommand) -> Result<RunResult, CliError> {
         version: 1,
         name: Some(project_name),
         libraries: Vec::new(),
+        plugins: Vec::new(),
     };
     let descriptor_json = to_pretty_json(&descriptor)?;
     std::fs::write(&descriptor_path, descriptor_json).map_err(|err| {
@@ -1122,13 +1125,14 @@ fn run_package_pull(command: PackagePullCommand) -> Result<RunResult, CliError> 
 }
 
 fn run_plugin_install(command: PluginInstallCommand) -> Result<RunResult, CliError> {
+    let install_source = resolve_plugin_install_input(&command)?;
     let source =
-        registry::read_plugin_install_source(&command.manifest).map_err(registry_error_to_cli)?;
+        registry::read_plugin_install_source(&install_source).map_err(registry_error_to_cli)?;
     let manifest: PluginManifestEnvelope = serde_json::from_value(source.manifest.clone())
         .map_err(|err| {
             CliError::usage(format!(
                 "invalid plugin manifest {}: {err}",
-                command.manifest.display()
+                install_source.display()
             ))
         })?;
     validate_plugin_manifest(&manifest)?;
@@ -1157,6 +1161,65 @@ fn run_plugin_install(command: PluginInstallCommand) -> Result<RunResult, CliErr
         exit_code: 0,
         stdout,
     })
+}
+
+fn resolve_plugin_install_input(command: &PluginInstallCommand) -> Result<PathBuf, CliError> {
+    let Some(source_repository) = &command.from else {
+        return Ok(command.manifest.clone());
+    };
+    if source_repository.starts_with("oci://")
+        || source_repository.starts_with("http://")
+        || source_repository.starts_with("https://")
+    {
+        return Err(CliError::usage(
+            "remote plugin package repositories are not implemented yet; use a local repository path or file:// path",
+        ));
+    }
+    let coordinate = command.manifest.to_string_lossy();
+    let (id, version) = parse_plugin_coordinate(&coordinate)?;
+    let repo_path = source_repository
+        .strip_prefix("file://")
+        .or_else(|| source_repository.strip_prefix("file:"))
+        .unwrap_or(source_repository);
+    let root = PathBuf::from(repo_path);
+    let id_segment = safe_package_path_segment(&id);
+    let version_segment = safe_package_path_segment(&version);
+    let candidates = [
+        root.join(&id_segment)
+            .join(&version_segment)
+            .join("plugin.mpack"),
+        root.join(&id_segment)
+            .join(&version_segment)
+            .join(format!("{}-{}.mpack", id_segment, version_segment)),
+    ];
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            CliError::execution(format!(
+                "plugin package {id}:{version} was not found in {}",
+                root.display()
+            ))
+        })
+}
+
+fn parse_plugin_coordinate(coordinate: &str) -> Result<(String, String), CliError> {
+    let Some(remainder) = coordinate.strip_prefix("mpack:") else {
+        return Err(CliError::usage(
+            "plugin coordinate must use mpack:<id>:<version>",
+        ));
+    };
+    let Some((id, version)) = remainder.rsplit_once(':') else {
+        return Err(CliError::usage(
+            "plugin coordinate must use mpack:<id>:<version>",
+        ));
+    };
+    if id.trim().is_empty() || version.trim().is_empty() {
+        return Err(CliError::usage(
+            "plugin coordinate must include non-empty id and version",
+        ));
+    }
+    Ok((id.to_string(), version.to_string()))
 }
 
 fn run_plugin_list(command: PluginListCommand) -> Result<RunResult, CliError> {
@@ -3840,6 +3903,60 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&inspect.stdout).unwrap();
         assert_eq!(json["id"], "org.mercurio.requirements");
         assert_eq!(json["cliActions"][0]["service"], "requirements.coverage");
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plugin_install_resolves_coordinate_from_local_repository() {
+        let root = temp_dir("mercurio-cli-plugin-coordinate-install");
+        let repo_package = root
+            .join("repo")
+            .join("org.mercurio.requirements")
+            .join("0.1.0")
+            .join("plugin.mpack");
+        std::fs::create_dir_all(repo_package.parent().unwrap()).unwrap();
+        write_test_plugin_package(
+            &repo_package,
+            r#"{
+  "id": "org.mercurio.requirements",
+  "version": "0.1.0",
+  "name": "Requirements Reasoning",
+  "services": [
+    {
+      "id": "requirements.coverage",
+      "runtime": "in_process"
+    }
+  ]
+}"#,
+        );
+
+        let registry = root.join("plugins");
+        let install = run_args(&[
+            "plugin",
+            "install",
+            "mpack:org.mercurio.requirements:0.1.0",
+            "--from",
+            root.join("repo").to_str().unwrap(),
+            "--root",
+            registry.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(install.exit_code, 0);
+        assert!(
+            install
+                .stdout
+                .contains("installed plugin: org.mercurio.requirements:0.1.0")
+        );
+        assert!(
+            registry
+                .join("installed")
+                .join("org.mercurio.requirements")
+                .join("0.1.0")
+                .join("plugin.mpack")
+                .is_file()
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
