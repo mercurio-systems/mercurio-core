@@ -206,6 +206,32 @@ For a `kpar:` locator, resolution should try:
 
 If the package is found remotely, Mercurio should download it, verify any pinned digest, stage it in the local cache, and then load it through the existing KPAR library path.
 
+## Compiled KIR Cache
+
+KPAR is the package distribution format. Mercurio compiles KPAR sources into KIR before using them as semantic context.
+
+For `kpar:` locators, Mercurio caches compiled KIR documents so repeated commands do not need to recompile unchanged packages:
+
+```text
+~/.mercurio/cache/kir/
+  domain-lib/
+    0.1.0/
+      fnv1a64_.../
+        fnv1a64_.../
+          document.kir.json
+          manifest.json
+```
+
+The cache key includes:
+
+- package name
+- package version
+- KPAR digest
+- importer version
+- library context digest
+
+The library context digest matters because non-baseline packages can compile differently depending on already-loaded baseline or dependency libraries.
+
 ## Planned OCI Publish
 
 After a KPAR has been staged locally, the publish command should later support pushing it to an OCI registry:

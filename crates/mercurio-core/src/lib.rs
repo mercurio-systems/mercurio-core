@@ -106,7 +106,8 @@ pub use language::{
 pub use library::{
     BaselineLibraryConfig, KparLocator, KparPackageBuild, KparPackageSource, LibraryCacheMetadata,
     LibraryProviderConfig, LocalPackageManifest, LocalPackageRepository, LocalPackageSource,
-    ResolvedLibraryArtifact, load_baseline_library_document, write_kpar_package,
+    PackageKirCache, PackageKirCacheManifest, ResolvedLibraryArtifact,
+    load_baseline_library_document, write_kpar_package,
 };
 pub use metadata::{
     KirMetadataAnnotation, metadata_annotations, metadata_annotations_named,
@@ -134,8 +135,9 @@ pub use outline::{
     build_editor_outline_index_for_graph, build_semantic_editor_outline_from_document,
 };
 pub use paths::{
-    bundled_package_repo_path, default_package_repo_path, default_stdlib_path,
-    default_stdlib_rulepack_path, default_workspace_root, repo_path, repo_root,
+    bundled_package_repo_path, default_package_kir_cache_path, default_package_repo_path,
+    default_stdlib_path, default_stdlib_rulepack_path, default_workspace_root, repo_path,
+    repo_root,
 };
 pub use project::{
     PROJECT_DESCRIPTOR_FILE_NAME, ProjectDescriptor, ProjectDescriptorError, ProjectLibraryRole,

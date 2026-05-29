@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::ir::{KirDocument, KirError};
-use crate::paths::{bundled_package_repo_path, default_package_repo_path, default_stdlib_path};
+use crate::paths::{
+    bundled_package_repo_path, default_package_kir_cache_path, default_package_repo_path,
+    default_stdlib_path,
+};
 
 pub const DEFAULT_STDLIB_LOCATOR: &str = "kpar:org.omg/sysml-stdlib:2.0.0";
 use crate::source_set::{SourceDocument, compile_source_documents};
@@ -105,6 +108,24 @@ pub struct LocalPackageSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalPackageRepository {
     root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageKirCache {
+    root: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PackageKirCacheManifest {
+    pub schema: String,
+    pub package: String,
+    pub version: String,
+    pub locator: String,
+    pub source_digest: String,
+    pub importer_version: String,
+    pub context_digest: String,
+    pub document: String,
+    pub element_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,8 +286,16 @@ impl LibraryProviderConfig {
                     if let Some(source_path) = repo.find_package(name, version)? {
                         let fallback_context = KirDocument::from_path(&default_stdlib_path())?;
                         let context_document = library_context.unwrap_or(&fallback_context);
-                        let (document, package_metadata) =
-                            compile_kpar_file(&source_path, context_document)?;
+                        let source_digest = digest_file(&source_path)?;
+                        let (document, package_metadata) = PackageKirCache::default_user()
+                            .load_or_compile(
+                                name,
+                                version,
+                                locator.as_str(),
+                                &source_path,
+                                &source_digest,
+                                context_document,
+                            )?;
                         return Ok(ResolvedLibraryArtifact {
                             library_id: library_id.to_string(),
                             source_kind: "kpar_locator".to_string(),
@@ -277,7 +306,7 @@ impl LibraryProviderConfig {
                                 source_version: package_metadata
                                     .and_then(|metadata| metadata.version)
                                     .or_else(|| Some(version.to_string())),
-                                source_digest: Some(digest_file(&source_path)?),
+                                source_digest: Some(source_digest),
                                 importer_version: env!("CARGO_PKG_VERSION").to_string(),
                             }),
                             document,
@@ -616,6 +645,159 @@ impl LocalPackageRepository {
     }
 }
 
+impl PackageKirCache {
+    pub fn default_user() -> Self {
+        Self::new(default_package_kir_cache_path())
+    }
+
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn cache_dir(
+        &self,
+        package: &str,
+        version: &str,
+        source_digest: &str,
+        context_digest: &str,
+    ) -> PathBuf {
+        let mut path = self.root.clone();
+        for segment in package.split('/') {
+            path.push(safe_package_path_segment(segment));
+        }
+        path.push(safe_package_path_segment(version));
+        path.push(safe_package_path_segment(source_digest));
+        path.push(safe_package_path_segment(context_digest));
+        path
+    }
+
+    pub fn document_path(
+        &self,
+        package: &str,
+        version: &str,
+        source_digest: &str,
+        context_digest: &str,
+    ) -> PathBuf {
+        self.cache_dir(package, version, source_digest, context_digest)
+            .join("document.kir.json")
+    }
+
+    pub fn manifest_path(
+        &self,
+        package: &str,
+        version: &str,
+        source_digest: &str,
+        context_digest: &str,
+    ) -> PathBuf {
+        self.cache_dir(package, version, source_digest, context_digest)
+            .join("manifest.json")
+    }
+
+    fn load_or_compile(
+        &self,
+        package: &str,
+        version: &str,
+        locator: &str,
+        source_path: &Path,
+        source_digest: &str,
+        library_context: &KirDocument,
+    ) -> Result<(KirDocument, Option<KparProjectMetadata>), KirError> {
+        let importer_version = env!("CARGO_PKG_VERSION").to_string();
+        let context_digest = digest_kir_document(library_context)?;
+        if let Some(document) = self.load_cached_document(
+            package,
+            version,
+            locator,
+            source_digest,
+            &importer_version,
+            &context_digest,
+        )? {
+            let (_, package_metadata) = collect_kpar_source_files(source_path)?;
+            return Ok((document, package_metadata));
+        }
+
+        let (document, package_metadata) = compile_kpar_file(source_path, library_context)?;
+        self.store_document(
+            package,
+            version,
+            locator,
+            source_digest,
+            &importer_version,
+            &context_digest,
+            &document,
+        )?;
+        Ok((document, package_metadata))
+    }
+
+    fn load_cached_document(
+        &self,
+        package: &str,
+        version: &str,
+        locator: &str,
+        source_digest: &str,
+        importer_version: &str,
+        context_digest: &str,
+    ) -> Result<Option<KirDocument>, KirError> {
+        let document_path = self.document_path(package, version, source_digest, context_digest);
+        let manifest_path = self.manifest_path(package, version, source_digest, context_digest);
+        if !document_path.is_file() || !manifest_path.is_file() {
+            return Ok(None);
+        }
+
+        let manifest = match std::fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|input| serde_json::from_str::<PackageKirCacheManifest>(&input).ok())
+        {
+            Some(manifest) => manifest,
+            None => return Ok(None),
+        };
+        if manifest.package != package
+            || manifest.version != version
+            || manifest.locator != locator
+            || manifest.source_digest != source_digest
+            || manifest.importer_version != importer_version
+            || manifest.context_digest != context_digest
+            || manifest.document != "document.kir.json"
+        {
+            return Ok(None);
+        }
+
+        Ok(KirDocument::from_path(&document_path).ok())
+    }
+
+    fn store_document(
+        &self,
+        package: &str,
+        version: &str,
+        locator: &str,
+        source_digest: &str,
+        importer_version: &str,
+        context_digest: &str,
+        document: &KirDocument,
+    ) -> Result<(), KirError> {
+        let document_path = self.document_path(package, version, source_digest, context_digest);
+        let manifest_path = self.manifest_path(package, version, source_digest, context_digest);
+        document.write_pretty_to_path(&document_path)?;
+        let manifest = PackageKirCacheManifest {
+            schema: "dev.mercurio.package-kir-cache.v1".to_string(),
+            package: package.to_string(),
+            version: version.to_string(),
+            locator: locator.to_string(),
+            source_digest: source_digest.to_string(),
+            importer_version: importer_version.to_string(),
+            context_digest: context_digest.to_string(),
+            document: "document.kir.json".to_string(),
+            element_count: document.elements.len(),
+        };
+        std::fs::write(manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+        Ok(())
+    }
+}
+
 impl KparLocator {
     pub fn parse(locator: impl Into<String>) -> Self {
         Self {
@@ -817,6 +999,14 @@ fn digest_file(path: &Path) -> Result<String, KirError> {
     file.read_to_end(&mut bytes)?;
     Ok(format_stable_digest([(
         "file".as_bytes(),
+        bytes.as_slice(),
+    )]))
+}
+
+fn digest_kir_document(document: &KirDocument) -> Result<String, KirError> {
+    let bytes = serde_json::to_vec(document)?;
+    Ok(format_stable_digest([(
+        "kir-document".as_bytes(),
         bytes.as_slice(),
     )]))
 }
@@ -1570,6 +1760,78 @@ mod tests {
     }
 
     #[test]
+    fn kpar_locator_reuses_cached_kir_document() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_root =
+            std::env::temp_dir().join(format!("mercurio-kpar-kir-cache-{}", std::process::id()));
+        let repo_root = temp_root.join("packages");
+        let cache_root = temp_root.join("kir-cache");
+        let repo = super::LocalPackageRepository::new(&repo_root);
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let source_path = temp_root.join("source.kpar");
+        write_test_kpar(
+            &source_path,
+            "Domain Library",
+            "1.2.3",
+            &[("domain.sysml", "package Domain {\n  part def Thing;\n}\n")],
+        );
+        repo.stage_kpar(&source_path, "domain-lib", "1.2.3", None)
+            .unwrap();
+
+        unsafe {
+            std::env::set_var("MERCURIO_PACKAGE_REPO", &repo_root);
+            std::env::set_var("MERCURIO_PACKAGE_KIR_CACHE", &cache_root);
+        }
+        let first = LibraryProviderConfig::KparLocator {
+            locator: "kpar:domain-lib:1.2.3".to_string(),
+        }
+        .resolve("domain-lib")
+        .unwrap();
+        assert!(
+            first
+                .document
+                .elements
+                .iter()
+                .any(|element| element.id == "type.Domain.Thing")
+        );
+
+        let cache_document = find_first_file_named(&cache_root, "document.kir.json").unwrap();
+        let cached = KirDocument {
+            metadata: BTreeMap::new(),
+            elements: vec![KirElement {
+                id: "type.Cached.Thing".to_string(),
+                kind: "SysML::Systems::PartDefinition".to_string(),
+                layer: 2,
+                properties: BTreeMap::from([(
+                    "qualified_name".to_string(),
+                    Value::String("Cached.Thing".to_string()),
+                )]),
+            }],
+        };
+        cached.write_pretty_to_path(&cache_document).unwrap();
+
+        let second = LibraryProviderConfig::KparLocator {
+            locator: "kpar:domain-lib:1.2.3".to_string(),
+        }
+        .resolve("domain-lib")
+        .unwrap();
+        unsafe {
+            std::env::remove_var("MERCURIO_PACKAGE_REPO");
+            std::env::remove_var("MERCURIO_PACKAGE_KIR_CACHE");
+        }
+
+        assert!(
+            second
+                .document
+                .elements
+                .iter()
+                .any(|element| element.id == "type.Cached.Thing")
+        );
+
+        std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
     fn local_package_repository_publishes_to_target_repository() {
         let temp_root = std::env::temp_dir().join(format!(
             "mercurio-local-package-publish-{}",
@@ -1791,5 +2053,27 @@ mod tests {
         }
 
         writer.finish().unwrap();
+    }
+
+    fn find_first_file_named(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+        if !root.is_dir() {
+            return None;
+        }
+        let mut entries = std::fs::read_dir(root)
+            .ok()?
+            .collect::<Result<Vec<_>, std::io::Error>>()
+            .ok()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = find_first_file_named(&path, name) {
+                    return Some(found);
+                }
+            } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
+                return Some(path);
+            }
+        }
+        None
     }
 }
