@@ -227,6 +227,7 @@ enum PackageSubcommand {
     Inspect(PackageInspectCommand),
     Compile(PackageCompileCommand),
     Publish(PackagePublishCommand),
+    Pull(PackagePullCommand),
 }
 
 #[derive(Debug, Args)]
@@ -278,6 +279,21 @@ struct PackagePublishCommand {
     version: String,
     #[arg(long)]
     to: String,
+    #[arg(long)]
+    repo: Option<PathBuf>,
+    #[arg(long)]
+    force: bool,
+    #[arg(long)]
+    quiet: bool,
+}
+
+#[derive(Debug, Args)]
+struct PackagePullCommand {
+    name: String,
+    #[arg(long)]
+    version: String,
+    #[arg(long = "from")]
+    from: String,
     #[arg(long)]
     repo: Option<PathBuf>,
     #[arg(long)]
@@ -685,6 +701,7 @@ fn run_package(command: PackageCommand) -> Result<RunResult, CliError> {
         PackageSubcommand::Inspect(command) => run_package_inspect(command),
         PackageSubcommand::Compile(command) => run_package_compile(command),
         PackageSubcommand::Publish(command) => run_package_publish(command),
+        PackageSubcommand::Pull(command) => run_package_pull(command),
     }
 }
 
@@ -963,6 +980,30 @@ fn run_package_publish(command: PackagePublishCommand) -> Result<RunResult, CliE
     } else {
         format!(
             "published: {}:{}\nfrom: {}\nto: {}\ndigest: {}\n",
+            manifest.name,
+            manifest.version,
+            source_repo.root().display(),
+            target_repo.root().display(),
+            manifest.digest
+        )
+    };
+    Ok(RunResult {
+        exit_code: 0,
+        stdout,
+    })
+}
+
+fn run_package_pull(command: PackagePullCommand) -> Result<RunResult, CliError> {
+    let target_repo = package_repo(command.repo);
+    let source_repo = package_repository_target(&command.from, "pull source")?;
+    let manifest = target_repo
+        .pull_from_repository(&source_repo, &command.name, &command.version, command.force)
+        .map_err(|err| CliError::execution(format!("failed to pull package: {err}")))?;
+    let stdout = if command.quiet {
+        String::new()
+    } else {
+        format!(
+            "pulled: {}:{}\nfrom: {}\nto: {}\ndigest: {}\n",
             manifest.name,
             manifest.version,
             source_repo.root().display(),
@@ -2012,17 +2053,24 @@ fn package_repo(path: Option<PathBuf>) -> LocalPackageRepository {
 }
 
 fn package_publish_target_repo(target: &str) -> Result<LocalPackageRepository, CliError> {
+    package_repository_target(target, "publish target")
+}
+
+fn package_repository_target(
+    target: &str,
+    target_label: &str,
+) -> Result<LocalPackageRepository, CliError> {
     if target.starts_with("oci://") {
-        return Err(CliError::usage(
-            "OCI publish is not implemented yet; publish to a package repository path or file:// path",
-        ));
+        return Err(CliError::usage(format!(
+            "OCI package transfer is not implemented yet; use a package repository path or file:// path for {target_label}"
+        )));
     }
     let path = target
         .strip_prefix("file://")
         .or_else(|| target.strip_prefix("file:"))
         .unwrap_or(target);
     if path.trim().is_empty() {
-        return Err(CliError::usage("publish target must not be empty"));
+        return Err(CliError::usage(format!("{target_label} must not be empty")));
     }
     Ok(LocalPackageRepository::new(PathBuf::from(path)))
 }
@@ -3049,6 +3097,94 @@ mod tests {
         unsafe {
             std::env::remove_var("MERCURIO_PACKAGE_REPO");
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn package_pull_copies_package_from_source_repo_to_local_repo() {
+        let root = temp_dir("mercurio-cli-package-pull");
+        let source_repo = root.join("source");
+        let target_repo = root.join("target");
+        let source_dir = root.join("src");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(
+            source_dir.join("model.sysml"),
+            "package Demo { part def Vehicle; }",
+        )
+        .unwrap();
+
+        let build = run_args(&[
+            "package",
+            "build",
+            "--file",
+            source_dir.to_str().unwrap(),
+            "--name",
+            "domain-lib",
+            "--version",
+            "1.2.3",
+            "--out",
+            root.join("domain-lib.kpar").to_str().unwrap(),
+            "--quiet",
+        ])
+        .unwrap();
+        assert_eq!(build.exit_code, 0);
+
+        let source_package = root.join("domain-lib.kpar");
+        let source_repo_model = LocalPackageRepository::new(&source_repo);
+        source_repo_model
+            .stage_kpar(&source_package, "domain-lib", "1.2.3", None)
+            .unwrap();
+
+        let pull = run_args(&[
+            "package",
+            "pull",
+            "domain-lib",
+            "--version",
+            "1.2.3",
+            "--from",
+            source_repo.to_str().unwrap(),
+            "--repo",
+            target_repo.to_str().unwrap(),
+        ])
+        .unwrap();
+        assert_eq!(pull.exit_code, 0);
+        assert!(pull.stdout.contains("pulled: domain-lib:1.2.3"));
+
+        let list = run_args(&["package", "list", "--repo", target_repo.to_str().unwrap()]).unwrap();
+        assert_eq!(list.exit_code, 0);
+        assert!(list.stdout.contains("domain-lib:1.2.3"));
+
+        let duplicate = run_args(&[
+            "package",
+            "pull",
+            "domain-lib",
+            "--version",
+            "1.2.3",
+            "--from",
+            source_repo.to_str().unwrap(),
+            "--repo",
+            target_repo.to_str().unwrap(),
+        ])
+        .unwrap_err();
+        assert!(duplicate.message.contains("already exists"));
+
+        let forced = run_args(&[
+            "package",
+            "pull",
+            "domain-lib",
+            "--version",
+            "1.2.3",
+            "--from",
+            source_repo.to_str().unwrap(),
+            "--repo",
+            target_repo.to_str().unwrap(),
+            "--force",
+            "--quiet",
+        ])
+        .unwrap();
+        assert_eq!(forced.exit_code, 0);
+        assert!(forced.stdout.is_empty());
+
         std::fs::remove_dir_all(root).unwrap();
     }
 

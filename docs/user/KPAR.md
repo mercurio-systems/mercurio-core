@@ -117,6 +117,20 @@ Published package versions are immutable by default. Use `--force` to overwrite 
 mercurio package publish domain-lib --version 0.1.0 --to C:/work/published-packages --force
 ```
 
+Pull a package from another repository into the local package repository:
+
+```powershell
+mercurio package pull domain-lib --version 0.1.0 --from C:/work/published-packages
+```
+
+Use `--repo` to pull into a non-default target repository:
+
+```powershell
+mercurio package pull domain-lib --version 0.1.0 --from C:/work/published-packages --repo C:/work/staged-packages
+```
+
+Pulled package versions are immutable by default. Use `--force` to overwrite an existing package in the target repository.
+
 ## Compile A KPAR
 
 Compile a KPAR package directly as a model input:

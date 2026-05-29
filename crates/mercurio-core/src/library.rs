@@ -670,6 +670,26 @@ impl LocalPackageRepository {
         version: &str,
         force: bool,
     ) -> Result<LocalPackageManifest, KirError> {
+        self.copy_package_to(target, name, version, force)
+    }
+
+    pub fn pull_from_repository(
+        &self,
+        source: &LocalPackageRepository,
+        name: &str,
+        version: &str,
+        force: bool,
+    ) -> Result<LocalPackageManifest, KirError> {
+        source.copy_package_to(self, name, version, force)
+    }
+
+    fn copy_package_to(
+        &self,
+        target: &LocalPackageRepository,
+        name: &str,
+        version: &str,
+        force: bool,
+    ) -> Result<LocalPackageManifest, KirError> {
         let Some(source_package_path) = self.find_package(name, version)? else {
             return Err(KirError::Sysml(format!(
                 "package {name} version {version} was not found in {}",
@@ -2049,6 +2069,44 @@ mod tests {
         source_repo
             .publish_to_repository(&target_repo, "domain-lib", "1.2.3", true)
             .unwrap();
+
+        std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
+    fn local_package_repository_pulls_from_source_repository() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "mercurio-local-package-pull-{}",
+            std::process::id()
+        ));
+        let source_repo = super::LocalPackageRepository::new(temp_root.join("source"));
+        let target_repo = super::LocalPackageRepository::new(temp_root.join("target"));
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let source_path = temp_root.join("source.kpar");
+        write_test_kpar(
+            &source_path,
+            "Domain Library",
+            "1.2.3",
+            &[("domain.sysml", "package Domain {\n  part def Thing;\n}\n")],
+        );
+        source_repo
+            .stage_kpar(&source_path, "domain-lib", "1.2.3", None)
+            .unwrap();
+
+        let manifest = target_repo
+            .pull_from_repository(&source_repo, "domain-lib", "1.2.3", false)
+            .unwrap();
+        let pulled = target_repo
+            .find_package("domain-lib", "1.2.3")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(manifest.name, "domain-lib");
+        assert!(pulled.is_file());
+        assert_eq!(
+            source_repo.read_manifest("domain-lib", "1.2.3").unwrap(),
+            target_repo.read_manifest("domain-lib", "1.2.3").unwrap()
+        );
 
         std::fs::remove_dir_all(temp_root).unwrap();
     }
