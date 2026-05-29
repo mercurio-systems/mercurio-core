@@ -39,8 +39,10 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 $packageRoot = Join-Path $OutputRoot "mercurio-$Target"
 $packageBin = Join-Path $packageRoot "bin"
 $packageWheels = Join-Path $packageRoot "wheels"
+$archivePath = Join-Path $OutputRoot "mercurio-$Target.zip"
 $sourceExe = Join-Path $repoRoot "target\$Configuration\mercurio.exe"
 $targetExe = Join-Path $packageBin "mercurio.exe"
+$installerScript = Join-Path $repoRoot "tools\install-mercurio.ps1"
 $pythonRoot = Join-Path $repoRoot "python"
 $pythonDist = Join-Path $pythonRoot "dist"
 $pythonVersion = Read-PythonPackageVersion (Join-Path $pythonRoot "pyproject.toml")
@@ -71,6 +73,9 @@ New-Item -ItemType Directory -Force -Path $packageWheels | Out-Null
 
 Write-Step "Copying Mercurio executable"
 Copy-Item -LiteralPath $sourceExe -Destination $targetExe -Force
+
+Write-Step "Copying installer script"
+Copy-Item -LiteralPath $installerScript -Destination (Join-Path $packageRoot "install-mercurio.ps1") -Force
 
 if (-not $SkipPythonWheel) {
     Write-Step "Building Mercurio Python wheel"
@@ -108,9 +113,17 @@ $manifest = [ordered]@{
     configuration = $Configuration
     packageRoot = $packageRoot
     executable = "bin/mercurio.exe"
+    installer = "install-mercurio.ps1"
     pythonWheel = if ($SkipPythonWheel) { $null } else { "wheels/$wheelName" }
 }
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $packageRoot "manifest.json") -Encoding UTF8
 
+Write-Step "Writing release archive"
+if (Test-Path $archivePath) {
+    Remove-Item -LiteralPath $archivePath -Force
+}
+Compress-Archive -Path (Join-Path $packageRoot "*") -DestinationPath $archivePath -Force
+
 Write-Host ""
 Write-Host "Release package written to $packageRoot"
+Write-Host "Release archive written to $archivePath"

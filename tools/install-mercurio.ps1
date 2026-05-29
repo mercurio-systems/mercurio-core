@@ -60,9 +60,12 @@ function Add-UserPathEntry {
     }
 }
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$scriptRoot = Resolve-Path $PSScriptRoot
+$packageExe = Join-Path $scriptRoot "bin\mercurio.exe"
+$isReleasePackage = Test-Path $packageExe
+$repoRoot = if ($isReleasePackage) { $scriptRoot } else { Resolve-Path (Join-Path $PSScriptRoot "..") }
 $binDir = Join-Path $InstallRoot "bin"
-$sourceExe = Join-Path $repoRoot "target\$Configuration\mercurio.exe"
+$sourceExe = if ($isReleasePackage) { $packageExe } else { Join-Path $repoRoot "target\$Configuration\mercurio.exe" }
 $targetExe = Join-Path $binDir "mercurio.exe"
 $pythonProject = Join-Path $repoRoot "python"
 $wheelInstallDir = Join-Path $InstallRoot "wheels"
@@ -98,7 +101,11 @@ Invoke-InstallCommand "Verifying Mercurio executable" {
 if ($InstallPython) {
     if ($PythonMode -eq "wheel") {
         if ([string]::IsNullOrWhiteSpace($PythonWheel)) {
-            $packageWheelDir = Join-Path $repoRoot "dist\mercurio-windows-x64\wheels"
+            $packageWheelDir = if ($isReleasePackage) {
+                Join-Path $repoRoot "wheels"
+            } else {
+                Join-Path $repoRoot "dist\mercurio-windows-x64\wheels"
+            }
             $wheels = @()
             if (Test-Path $packageWheelDir) {
                 $wheels = Get-ChildItem -Path $packageWheelDir -Filter "mercurio-*.whl" | Sort-Object LastWriteTime -Descending
