@@ -136,8 +136,8 @@ pub use outline::{
 };
 pub use paths::{
     bundled_package_repo_path, default_package_kir_cache_path, default_package_repo_path,
-    default_stdlib_path, default_stdlib_rulepack_path, default_workspace_root, repo_path,
-    repo_root,
+    default_stdlib_path, default_stdlib_rulepack_path, default_user_config_path,
+    default_workspace_root, repo_path, repo_root,
 };
 pub use project::{
     PROJECT_DESCRIPTOR_FILE_NAME, ProjectDescriptor, ProjectDescriptorError, ProjectLibraryRole,

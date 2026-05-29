@@ -163,7 +163,7 @@ Relative paths are resolved from the descriptor location.
 
 ## Package Locators
 
-Project descriptors can use a locator-based provider. A locator describes the package coordinate, while Mercurio decides whether to load it from the local package repository, a bundled repository, or a configured remote in later implementations.
+Project descriptors can use a locator-based provider. A locator describes the package coordinate, while Mercurio decides whether to load it from the local package repository, configured package repositories, or a bundled repository.
 
 Example:
 
@@ -201,10 +201,31 @@ oci:ghcr.io/acme/mercurio/domain-lib:0.1.0
 For a `kpar:` locator, resolution should try:
 
 1. Local user package repository.
-2. Bundled package repository.
-3. Configured remote package sources in a later implementation.
+2. Configured package repositories.
+3. Bundled package repository.
 
-If the package is found remotely, Mercurio should download it, verify any pinned digest, stage it in the local cache, and then load it through the existing KPAR library path.
+Configured repositories are exact package repository roots. They do not require an index.
+
+Use an environment variable for ad hoc configuration:
+
+```powershell
+$env:MERCURIO_PACKAGE_REPOSITORIES = "C:/work/published-packages;D:/shared/mercurio-packages"
+```
+
+Or configure repository roots in `~/.mercurio/config.json`:
+
+```json
+{
+  "package_repositories": [
+    "C:/work/published-packages",
+    "D:/shared/mercurio-packages"
+  ]
+}
+```
+
+Use `MERCURIO_CONFIG_PATH` to point Mercurio at a different config file.
+
+If the package is found in a configured repository, Mercurio verifies the staged package manifest digest and then loads it through the existing KPAR library path.
 
 ## Compiled KIR Cache
 

@@ -47,6 +47,20 @@ pub fn default_package_repo_path() -> PathBuf {
     home.join(".mercurio").join("packages")
 }
 
+pub fn default_user_config_path() -> PathBuf {
+    if let Ok(path) = std::env::var("MERCURIO_CONFIG_PATH") {
+        return PathBuf::from(path);
+    }
+
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(repo_root);
+
+    home.join(".mercurio").join("config.json")
+}
+
 pub fn default_package_kir_cache_path() -> PathBuf {
     if let Ok(path) = std::env::var("MERCURIO_PACKAGE_KIR_CACHE") {
         return PathBuf::from(path);
