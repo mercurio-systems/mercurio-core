@@ -226,6 +226,7 @@ enum PackageSubcommand {
     List(PackageListCommand),
     Inspect(PackageInspectCommand),
     Compile(PackageCompileCommand),
+    Publish(PackagePublishCommand),
 }
 
 #[derive(Debug, Args)]
@@ -268,6 +269,21 @@ struct PackageCompileCommand {
     repo: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     format: OutputFormat,
+}
+
+#[derive(Debug, Args)]
+struct PackagePublishCommand {
+    name: String,
+    #[arg(long)]
+    version: String,
+    #[arg(long)]
+    to: String,
+    #[arg(long)]
+    repo: Option<PathBuf>,
+    #[arg(long)]
+    force: bool,
+    #[arg(long)]
+    quiet: bool,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -668,6 +684,7 @@ fn run_package(command: PackageCommand) -> Result<RunResult, CliError> {
         PackageSubcommand::List(command) => run_package_list(command),
         PackageSubcommand::Inspect(command) => run_package_inspect(command),
         PackageSubcommand::Compile(command) => run_package_compile(command),
+        PackageSubcommand::Publish(command) => run_package_publish(command),
     }
 }
 
@@ -932,6 +949,30 @@ fn run_package_compile(command: PackageCompileCommand) -> Result<RunResult, CliE
         language: None,
         format: command.format,
         stdlib: None,
+    })
+}
+
+fn run_package_publish(command: PackagePublishCommand) -> Result<RunResult, CliError> {
+    let source_repo = package_repo(command.repo);
+    let target_repo = package_publish_target_repo(&command.to)?;
+    let manifest = source_repo
+        .publish_to_repository(&target_repo, &command.name, &command.version, command.force)
+        .map_err(|err| CliError::execution(format!("failed to publish package: {err}")))?;
+    let stdout = if command.quiet {
+        String::new()
+    } else {
+        format!(
+            "published: {}:{}\nfrom: {}\nto: {}\ndigest: {}\n",
+            manifest.name,
+            manifest.version,
+            source_repo.root().display(),
+            target_repo.root().display(),
+            manifest.digest
+        )
+    };
+    Ok(RunResult {
+        exit_code: 0,
+        stdout,
     })
 }
 
@@ -1970,6 +2011,22 @@ fn package_repo(path: Option<PathBuf>) -> LocalPackageRepository {
         .unwrap_or_else(LocalPackageRepository::default_user)
 }
 
+fn package_publish_target_repo(target: &str) -> Result<LocalPackageRepository, CliError> {
+    if target.starts_with("oci://") {
+        return Err(CliError::usage(
+            "OCI publish is not implemented yet; publish to a package repository path or file:// path",
+        ));
+    }
+    let path = target
+        .strip_prefix("file://")
+        .or_else(|| target.strip_prefix("file:"))
+        .unwrap_or(target);
+    if path.trim().is_empty() {
+        return Err(CliError::usage("publish target must not be empty"));
+    }
+    Ok(LocalPackageRepository::new(PathBuf::from(path)))
+}
+
 fn collect_package_manifest_rows(
     repo_root: &Path,
     current: &Path,
@@ -2461,7 +2518,10 @@ fn to_pretty_json(value: &impl Serialize) -> Result<String, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn run_args(args: &[&str]) -> Result<RunResult, CliError> {
         let cli = Cli::try_parse_from(std::iter::once("mercurio").chain(args.iter().copied()))
@@ -2909,6 +2969,87 @@ mod tests {
                 .iter()
                 .any(|element| element.id == "type.Hidden.CacheOnly")
         );
+    }
+
+    #[test]
+    fn package_publish_copies_staged_package_to_target_repo() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let root = temp_dir("mercurio-cli-package-publish");
+        let source_repo = root.join("stage");
+        let target_repo = root.join("published");
+        let source_dir = root.join("src");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(
+            source_dir.join("model.sysml"),
+            "package Demo { part def Vehicle; }",
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("MERCURIO_PACKAGE_REPO", &source_repo);
+        }
+        let build = run_args(&[
+            "package",
+            "build",
+            "--file",
+            source_dir.to_str().unwrap(),
+            "--name",
+            "domain-lib",
+            "--version",
+            "1.2.3",
+            "--quiet",
+        ])
+        .unwrap();
+        assert_eq!(build.exit_code, 0);
+
+        let publish = run_args(&[
+            "package",
+            "publish",
+            "domain-lib",
+            "--version",
+            "1.2.3",
+            "--to",
+            target_repo.to_str().unwrap(),
+        ])
+        .unwrap();
+        assert_eq!(publish.exit_code, 0);
+        assert!(publish.stdout.contains("published: domain-lib:1.2.3"));
+
+        let list = run_args(&["package", "list", "--repo", target_repo.to_str().unwrap()]).unwrap();
+        assert_eq!(list.exit_code, 0);
+        assert!(list.stdout.contains("domain-lib:1.2.3"));
+
+        let duplicate = run_args(&[
+            "package",
+            "publish",
+            "domain-lib",
+            "--version",
+            "1.2.3",
+            "--to",
+            target_repo.to_str().unwrap(),
+        ])
+        .unwrap_err();
+        assert!(duplicate.message.contains("already exists"));
+
+        let forced = run_args(&[
+            "package",
+            "publish",
+            "domain-lib",
+            "--version",
+            "1.2.3",
+            "--to",
+            target_repo.to_str().unwrap(),
+            "--force",
+            "--quiet",
+        ])
+        .unwrap();
+        assert_eq!(forced.exit_code, 0);
+        assert!(forced.stdout.is_empty());
+
+        unsafe {
+            std::env::remove_var("MERCURIO_PACKAGE_REPO");
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

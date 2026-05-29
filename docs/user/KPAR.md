@@ -99,6 +99,24 @@ Compile a staged package:
 mercurio package compile domain-lib --version 0.1.0 --format json
 ```
 
+Publish a staged package into another package repository:
+
+```powershell
+mercurio package publish domain-lib --version 0.1.0 --to C:/work/published-packages
+```
+
+Use `--repo` to publish from a non-default source repository:
+
+```powershell
+mercurio package publish domain-lib --version 0.1.0 --repo C:/work/staged-packages --to C:/work/published-packages
+```
+
+Published package versions are immutable by default. Use `--force` to overwrite an existing package in the target repository:
+
+```powershell
+mercurio package publish domain-lib --version 0.1.0 --to C:/work/published-packages --force
+```
+
 ## Compile A KPAR
 
 Compile a KPAR package directly as a model input:
@@ -190,7 +208,7 @@ If the package is found remotely, Mercurio should download it, verify any pinned
 
 ## Planned OCI Publish
 
-After a KPAR has been staged locally, a publish command can push it to an OCI registry:
+After a KPAR has been staged locally, the publish command should later support pushing it to an OCI registry:
 
 ```powershell
 mercurio package publish domain-lib --version 0.1.0 --to oci://ghcr.io/acme/mercurio/domain-lib:0.1.0

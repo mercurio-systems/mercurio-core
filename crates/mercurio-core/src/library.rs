@@ -582,6 +582,38 @@ impl LocalPackageRepository {
         )?;
         Ok(manifest)
     }
+
+    pub fn publish_to_repository(
+        &self,
+        target: &LocalPackageRepository,
+        name: &str,
+        version: &str,
+        force: bool,
+    ) -> Result<LocalPackageManifest, KirError> {
+        let Some(source_package_path) = self.find_package(name, version)? else {
+            return Err(KirError::Sysml(format!(
+                "package {name} version {version} was not found in {}",
+                self.root.display()
+            )));
+        };
+        let manifest = self.read_manifest(name, version)?;
+        let target_dir = target.package_dir(name, version);
+        let target_manifest_path = target.manifest_path(name, version);
+        let target_package_path = target_dir.join(&manifest.file);
+        if !force && (target_manifest_path.exists() || target_package_path.exists()) {
+            return Err(KirError::Sysml(format!(
+                "package {name} version {version} already exists in {}; use --force to overwrite",
+                target.root.display()
+            )));
+        }
+        std::fs::create_dir_all(&target_dir)?;
+        std::fs::copy(&source_package_path, &target_package_path)?;
+        std::fs::write(
+            target_manifest_path,
+            serde_json::to_string_pretty(&manifest)?,
+        )?;
+        Ok(manifest)
+    }
 }
 
 impl KparLocator {
@@ -1533,6 +1565,79 @@ mod tests {
                 .iter()
                 .any(|element| element.id == "type.Domain.Thing")
         );
+
+        std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
+    fn local_package_repository_publishes_to_target_repository() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "mercurio-local-package-publish-{}",
+            std::process::id()
+        ));
+        let source_repo = super::LocalPackageRepository::new(temp_root.join("source"));
+        let target_repo = super::LocalPackageRepository::new(temp_root.join("target"));
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let source_path = temp_root.join("source.kpar");
+        write_test_kpar(
+            &source_path,
+            "Domain Library",
+            "1.2.3",
+            &[("domain.sysml", "package Domain {\n  part def Thing;\n}\n")],
+        );
+        source_repo
+            .stage_kpar(&source_path, "domain-lib", "1.2.3", None)
+            .unwrap();
+
+        let manifest = source_repo
+            .publish_to_repository(&target_repo, "domain-lib", "1.2.3", false)
+            .unwrap();
+        let published = target_repo
+            .find_package("domain-lib", "1.2.3")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(manifest.name, "domain-lib");
+        assert!(published.is_file());
+        assert_eq!(
+            source_repo.read_manifest("domain-lib", "1.2.3").unwrap(),
+            target_repo.read_manifest("domain-lib", "1.2.3").unwrap()
+        );
+
+        std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
+    fn local_package_repository_publish_rejects_existing_without_force() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "mercurio-local-package-publish-existing-{}",
+            std::process::id()
+        ));
+        let source_repo = super::LocalPackageRepository::new(temp_root.join("source"));
+        let target_repo = super::LocalPackageRepository::new(temp_root.join("target"));
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let source_path = temp_root.join("source.kpar");
+        write_test_kpar(
+            &source_path,
+            "Domain Library",
+            "1.2.3",
+            &[("domain.sysml", "package Domain {\n  part def Thing;\n}\n")],
+        );
+        source_repo
+            .stage_kpar(&source_path, "domain-lib", "1.2.3", None)
+            .unwrap();
+        source_repo
+            .publish_to_repository(&target_repo, "domain-lib", "1.2.3", false)
+            .unwrap();
+
+        let err = source_repo
+            .publish_to_repository(&target_repo, "domain-lib", "1.2.3", false)
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"));
+
+        source_repo
+            .publish_to_repository(&target_repo, "domain-lib", "1.2.3", true)
+            .unwrap();
 
         std::fs::remove_dir_all(temp_root).unwrap();
     }
