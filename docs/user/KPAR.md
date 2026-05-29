@@ -31,6 +31,14 @@ Override package metadata:
 mercurio package build --file model.sysml --out model.kpar --name Demo --version 0.1.0
 ```
 
+Embed the compiled KIR document in the KPAR:
+
+```powershell
+mercurio package build --file src --out domain-lib-0.1.0.kpar --name domain-lib --version 0.1.0 --include-kir
+```
+
+When `document.kir.json` is present in a KPAR, Mercurio loads that precompiled KIR instead of recompiling the package sources. The source files still remain in the archive for inspection and future rebuilds.
+
 ## Local Package Repository
 
 Mercurio supports a Maven-like local package repository for staged KPAR packages. In this workflow, `package build` can write to a local package repository first, and a later `package publish` command can push that staged package to a remote registry.

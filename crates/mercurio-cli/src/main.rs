@@ -243,6 +243,8 @@ struct PackageBuildCommand {
     #[arg(long)]
     version: Option<String>,
     #[arg(long)]
+    include_kir: bool,
+    #[arg(long)]
     quiet: bool,
 }
 
@@ -828,6 +830,7 @@ fn run_package_build(command: PackageBuildCommand) -> Result<RunResult, CliError
         name: package_name,
         version: command.version.clone(),
         sources,
+        precompiled_kir: None,
     };
     let library_context =
         load_library_context(command.stdlib.as_deref(), package_context_path(&command)?)?;
@@ -858,6 +861,26 @@ fn run_package_build(command: PackageBuildCommand) -> Result<RunResult, CliError
             });
         }
     };
+    if command.include_kir {
+        let package = KparPackageBuild {
+            precompiled_kir: Some(artifact.document.clone()),
+            ..package.clone()
+        };
+        write_kpar_package(&temp_path, &package)
+            .map_err(|err| CliError::execution(format!("failed to write package: {err}")))?;
+        let validation = LibraryProviderConfig::KparFile {
+            path: temp_path.display().to_string(),
+        }
+        .resolve_with_context("package", None, Some(&library_context.document));
+        if let Err(err) = validation {
+            let _ = std::fs::remove_file(&temp_path);
+            let stdout = format!("package validation failed: {err}\n");
+            return Ok(RunResult {
+                exit_code: 1,
+                stdout,
+            });
+        }
+    }
 
     let wrote_path = if let Some(out) = &command.out {
         if let Some(parent) = out.parent() {
@@ -3226,6 +3249,43 @@ mod tests {
                 .iter()
                 .any(|element| element["id"] == "type.Demo.Vehicle")
         );
+    }
+
+    #[test]
+    fn package_build_include_kir_writes_compilable_package() {
+        let root = temp_dir("mercurio-cli-package-include-kir");
+        std::fs::create_dir_all(&root).unwrap();
+        let source_path = root.join("model.sysml");
+        let out_path = root.join("model.kpar");
+        std::fs::write(&source_path, "package Demo { part def Vehicle; }").unwrap();
+
+        let build = run_args(&[
+            "package",
+            "build",
+            "--file",
+            source_path.to_str().unwrap(),
+            "--out",
+            out_path.to_str().unwrap(),
+            "--include-kir",
+            "--quiet",
+        ])
+        .unwrap();
+
+        assert_eq!(build.exit_code, 0);
+        let artifact = LibraryProviderConfig::KparFile {
+            path: out_path.display().to_string(),
+        }
+        .resolve("demo")
+        .unwrap();
+        assert!(
+            artifact
+                .document
+                .elements
+                .iter()
+                .any(|element| element.id == "type.Demo.Vehicle")
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
