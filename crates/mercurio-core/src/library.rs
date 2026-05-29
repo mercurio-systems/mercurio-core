@@ -13,6 +13,7 @@ use crate::paths::{
 pub const DEFAULT_STDLIB_LOCATOR: &str = "kpar:org.omg/sysml-stdlib:2.0.0";
 const DEFAULT_STDLIB_PACKAGE_SET_ENTRY: &str =
     "https://www.omg.org/spec/SysML/20250201/Systems-Library.kpar";
+const KPAR_PRECOMPILED_KIR_ENTRY: &str = "document.kir.json";
 use crate::source_set::{SourceDocument, compile_source_documents};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,11 +76,12 @@ pub struct LibrarySourceFingerprint {
     pub cache_metadata: LibraryCacheMetadata,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct KparPackageBuild {
     pub name: String,
     pub version: Option<String>,
     pub sources: Vec<KparPackageSource>,
+    pub precompiled_kir: Option<KirDocument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -987,6 +989,13 @@ pub fn write_kpar_package(path: &Path, package: &KparPackageBuild) -> Result<(),
         .map_err(zip_error_to_kir_error)?;
     writer.write_all(br#"{"files":[]}"#)?;
 
+    if let Some(document) = &package.precompiled_kir {
+        writer
+            .start_file(KPAR_PRECOMPILED_KIR_ENTRY, options)
+            .map_err(zip_error_to_kir_error)?;
+        writer.write_all(serde_json::to_string_pretty(document)?.as_bytes())?;
+    }
+
     for source in &sources {
         writer
             .start_file(&source.path, options)
@@ -1010,7 +1019,14 @@ fn compile_kpar_file(
     path: &Path,
     library_context: &KirDocument,
 ) -> Result<(KirDocument, Option<KparProjectMetadata>), KirError> {
-    let (source_files, package_metadata) = collect_kpar_source_files(path)?;
+    let KparArchiveContent {
+        source_files,
+        package_metadata,
+        precompiled_kir,
+    } = collect_kpar_archive_content(path)?;
+    if let Some(document) = precompiled_kir {
+        return Ok((document, package_metadata));
+    }
     let document = compile_library_source_files(source_files, library_context)?;
     Ok((document, package_metadata))
 }
@@ -1211,13 +1227,18 @@ where
     format!("fnv1a64:{hash:016x}")
 }
 
-fn collect_kpar_source_files(
-    path: &Path,
-) -> Result<(Vec<SourceDocument>, Option<KparProjectMetadata>), KirError> {
+struct KparArchiveContent {
+    source_files: Vec<SourceDocument>,
+    package_metadata: Option<KparProjectMetadata>,
+    precompiled_kir: Option<KirDocument>,
+}
+
+fn collect_kpar_archive_content(path: &Path) -> Result<KparArchiveContent, KirError> {
     let file = std::fs::File::open(path)?;
     let mut archive = zip::ZipArchive::new(file).map_err(zip_error_to_kir_error)?;
     let mut files = Vec::new();
     let mut package_metadata = None;
+    let mut precompiled_kir = None;
 
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(zip_error_to_kir_error)?;
@@ -1233,6 +1254,13 @@ fn collect_kpar_source_files(
             continue;
         }
 
+        if entry_name == KPAR_PRECOMPILED_KIR_ENTRY {
+            let mut content = String::new();
+            entry.read_to_string(&mut content)?;
+            precompiled_kir = Some(serde_json::from_str(&content).map_err(KirError::Json)?);
+            continue;
+        }
+
         if !is_library_archive_source_entry(&entry_name) {
             continue;
         }
@@ -1243,7 +1271,18 @@ fn collect_kpar_source_files(
     }
 
     files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok((files, package_metadata))
+    Ok(KparArchiveContent {
+        source_files: files,
+        package_metadata,
+        precompiled_kir,
+    })
+}
+
+fn collect_kpar_source_files(
+    path: &Path,
+) -> Result<(Vec<SourceDocument>, Option<KparProjectMetadata>), KirError> {
+    let content = collect_kpar_archive_content(path)?;
+    Ok((content.source_files, content.package_metadata))
 }
 
 fn build_kpar_package_index(path: &Path) -> Result<KparPackageIndex, KirError> {
@@ -1767,6 +1806,7 @@ mod tests {
             &KparPackageBuild {
                 name: "Domain Library".to_string(),
                 version: Some("1.2.3".to_string()),
+                precompiled_kir: None,
                 sources: vec![KparPackageSource {
                     path: "domain.sysml".to_string(),
                     content: "package Domain {\n  part def Thing;\n}\n".to_string(),
@@ -1827,6 +1867,53 @@ mod tests {
             staged.file_name().and_then(|value| value.to_str()),
             Some("domain-lib-1.2.3.kpar")
         );
+
+        std::fs::remove_dir_all(temp_root).unwrap();
+    }
+
+    #[test]
+    fn kpar_file_provider_prefers_precompiled_kir_payload() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "mercurio-kpar-precompiled-kir-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let kpar_path = temp_root.join("domain-lib.kpar");
+        let document = KirDocument {
+            metadata: BTreeMap::from([(
+                "source".to_string(),
+                Value::String("precompiled".to_string()),
+            )]),
+            elements: vec![KirElement {
+                id: "type.Precompiled.Thing".to_string(),
+                kind: "PartDefinition".to_string(),
+                layer: 2,
+                properties: BTreeMap::new(),
+            }],
+        };
+
+        write_kpar_package(
+            &kpar_path,
+            &KparPackageBuild {
+                name: "Domain Library".to_string(),
+                version: Some("1.2.3".to_string()),
+                precompiled_kir: Some(document),
+                sources: vec![KparPackageSource {
+                    path: "invalid.sysml".to_string(),
+                    content: "this is not sysml".to_string(),
+                }],
+            },
+        )
+        .unwrap();
+
+        let artifact = LibraryProviderConfig::KparFile {
+            path: kpar_path.display().to_string(),
+        }
+        .resolve("domain-lib")
+        .unwrap();
+
+        assert_eq!(artifact.document.elements.len(), 1);
+        assert_eq!(artifact.document.elements[0].id, "type.Precompiled.Thing");
 
         std::fs::remove_dir_all(temp_root).unwrap();
     }
