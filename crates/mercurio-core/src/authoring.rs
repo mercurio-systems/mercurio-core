@@ -67,6 +67,7 @@ pub struct Usage {
     pub is_implicit_name: bool,
     pub ty: Option<QualifiedName>,
     pub reference_target: Option<QualifiedName>,
+    pub metadata_properties: BTreeMap<String, String>,
     pub multiplicity: Option<MultiplicityRange>,
     pub expression: Option<String>,
     pub additional_types: Vec<QualifiedName>,
@@ -132,6 +133,11 @@ pub enum Mutation {
         kind: String,
         source: QualifiedName,
         target: QualifiedName,
+    },
+    AddMetadataAnnotation {
+        element: QualifiedName,
+        metadata_type: String,
+        properties: BTreeMap<String, String>,
     },
     RemoveDeclaration {
         qualified_name: QualifiedName,
@@ -744,6 +750,7 @@ impl AuthoringProject {
                     is_implicit_name: false,
                     ty,
                     reference_target: None,
+                    metadata_properties: BTreeMap::new(),
                     multiplicity: None,
                     expression: None,
                     additional_types: Vec::new(),
@@ -774,6 +781,43 @@ impl AuthoringProject {
                 changed_files.insert(file.clone());
                 let owner = owner_qname.unwrap_or_default();
                 changed_declarations.insert(join_qname(&owner, &relationship_name));
+                vec![instruction]
+            }
+            Mutation::AddMetadataAnnotation {
+                element,
+                metadata_type,
+                properties,
+            } => {
+                if metadata_type.trim().is_empty() {
+                    return Err(AuthoringError::InvalidMutation(
+                        "metadata annotation type must not be empty".to_string(),
+                    ));
+                }
+                let usage = Declaration::Usage(Usage {
+                    keyword: "metadata".to_string(),
+                    name: metadata_type.clone(),
+                    is_implicit_name: false,
+                    ty: None,
+                    reference_target: None,
+                    metadata_properties: properties,
+                    multiplicity: None,
+                    expression: None,
+                    additional_types: Vec::new(),
+                    specializes: Vec::new(),
+                    subsets: Vec::new(),
+                    redefines: Vec::new(),
+                    members: Vec::new(),
+                    docs: Vec::new(),
+                    modifiers: Vec::new(),
+                });
+                let (file, _, instruction) = self.push_into_container(
+                    ContainerSelector::Declaration {
+                        qualified_name: element.clone(),
+                    },
+                    usage,
+                )?;
+                changed_files.insert(file);
+                changed_declarations.insert(element.as_dot_string());
                 vec![instruction]
             }
             Mutation::RemoveDeclaration { qualified_name } => {
@@ -1776,6 +1820,26 @@ impl Usage {
             lines.push(format!("{prefix}}}"));
             return lines.join("\n");
         }
+        if self.keyword == "metadata" {
+            header.push('@');
+            header.push_str(&self.name.replace('.', "::"));
+            if self.metadata_properties.is_empty() {
+                header.push(';');
+                lines.push(format!("{prefix}{header}"));
+                return lines.join("\n");
+            }
+            header.push_str(" {");
+            lines.push(format!("{prefix}{header}"));
+            for (key, value) in &self.metadata_properties {
+                lines.push(format!(
+                    "{}  {key} = {};",
+                    prefix,
+                    render_metadata_property_value(value)
+                ));
+            }
+            lines.push(format!("{prefix}}}"));
+            return lines.join("\n");
+        }
         header.push_str(&self.keyword);
         header.push(' ');
         if !self.is_implicit_name {
@@ -1915,6 +1979,7 @@ impl Declaration {
                     .as_ref()
                     .map(|ty| QualifiedName(ty.segments.clone())),
                 reference_target: None,
+                metadata_properties: BTreeMap::new(),
                 multiplicity: usage.multiplicity.clone(),
                 expression: usage.expression.as_ref().map(render_expr),
                 additional_types: usage
@@ -1973,6 +2038,7 @@ impl Declaration {
                     .reference_target
                     .as_ref()
                     .map(|target| QualifiedName(target.segments.clone())),
+                metadata_properties: usage.metadata_properties.clone(),
                 multiplicity: usage.multiplicity.clone(),
                 expression: usage.expression.as_ref().map(render_expr),
                 additional_types: usage
@@ -3359,6 +3425,7 @@ fn relationship_usage(
             is_implicit_name: false,
             ty: None,
             reference_target: Some(target.clone()),
+            metadata_properties: BTreeMap::new(),
             multiplicity: None,
             expression: None,
             additional_types: Vec::new(),
@@ -3563,6 +3630,28 @@ fn render_binary_op(op: &BinaryOp) -> &'static str {
         BinaryOp::And => "and",
         BinaryOp::Or => "or",
     }
+}
+
+fn render_metadata_property_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "\"\"".to_string();
+    }
+    if is_unquoted_metadata_value(trimmed) {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed:?}")
+    }
+}
+
+fn is_unquoted_metadata_value(value: &str) -> bool {
+    value.split("::").all(|segment| {
+        let mut chars = segment.chars();
+        chars
+            .next()
+            .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+            && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    })
 }
 
 fn render_with_indent(rendered: &str, indent: usize) -> String {
@@ -3915,6 +4004,7 @@ fn build_declaration_from_kir(
             is_implicit_name: element.properties.get("declared_name").is_none(),
             ty: ty.clone(),
             reference_target: None,
+            metadata_properties: BTreeMap::new(),
             multiplicity: element
                 .properties
                 .get("multiplicity")
@@ -4123,6 +4213,44 @@ mod tests {
         assert_eq!(write_back.mode, WriteBackMode::LocalizedPatch);
         assert!(text.contains("// file comment"));
         assert!(text.contains("part engine: Engine;"));
+        assert!(write_back.validation.ok);
+    }
+
+    #[test]
+    fn adding_metadata_annotation_round_trips_through_source() {
+        let source = r#"package Demo {
+  metadata def ReviewTag {
+    attribute status : String;
+    attribute owner : String;
+  }
+  requirement safeStart;
+}
+"#;
+        let mut project = load_authoring_project_from_sysml(
+            [("model.sysml".to_string(), source.to_string())]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+
+        let mutation = project
+            .apply_mutation(Mutation::AddMetadataAnnotation {
+                element: qname("Demo.safeStart"),
+                metadata_type: "ReviewTag".to_string(),
+                properties: [
+                    ("owner".to_string(), "Safety Team".to_string()),
+                    ("status".to_string(), "draft".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+            })
+            .unwrap();
+        let write_back = project.write_back_mutation(&mutation).unwrap();
+        let text = write_back.edited_files.get("model.sysml").unwrap();
+
+        assert!(text.contains("@ReviewTag"));
+        assert!(text.contains("owner = \"Safety Team\";"));
+        assert!(text.contains("status = draft;"));
         assert!(write_back.validation.ok);
     }
 

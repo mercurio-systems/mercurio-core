@@ -543,6 +543,15 @@ where
                 source: source.as_qualified_name(),
                 target: target.as_qualified_name(),
             }),
+            SemanticMutation::AddMetadataAnnotation {
+                element,
+                metadata_type,
+                properties,
+            } => Some(Mutation::AddMetadataAnnotation {
+                element: element.as_qualified_name(),
+                metadata_type: metadata_type.clone(),
+                properties: properties.clone(),
+            }),
             SemanticMutation::SetAttribute { .. } => None,
         }
     }
@@ -668,6 +677,20 @@ where
                     warnings,
                     blocking_reasons,
                 );
+            }
+            SemanticMutation::AddMetadataAnnotation {
+                element,
+                metadata_type,
+                ..
+            } => {
+                self.require_existing(project, element, index, "metadata target", blocking_reasons);
+                if metadata_type.trim().is_empty() {
+                    blocking_reasons.push(FeasibilityIssue {
+                        kind: FeasibilityIssueKind::ValidationFailure,
+                        operation_index: Some(index),
+                        message: "metadata annotation type must not be empty".to_string(),
+                    });
+                }
             }
             SemanticMutation::SetExpression { element, .. } => {
                 self.require_existing(project, element, index, "element", blocking_reasons);

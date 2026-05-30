@@ -87,6 +87,11 @@ pub enum SemanticMutation {
         source: ElementRef,
         target: ElementRef,
     },
+    AddMetadataAnnotation {
+        element: ElementRef,
+        metadata_type: String,
+        properties: BTreeMap<String, String>,
+    },
     RenameDeclaration {
         element: ElementRef,
         new_name: String,
@@ -703,6 +708,7 @@ pub fn default_semantic_mutation_capability_context() -> SemanticMutationCapabil
             "AddDefinition".to_string(),
             "AddUsage".to_string(),
             "AddRelationship".to_string(),
+            "AddMetadataAnnotation".to_string(),
             "RenameDeclaration".to_string(),
             "UpdateUsageType".to_string(),
             "SetExpression".to_string(),
@@ -950,6 +956,12 @@ pub(crate) fn diff_for_operation(
             source: source.clone(),
             target: target.clone(),
         }),
+        SemanticMutation::AddMetadataAnnotation { element, .. } => {
+            diff.changed_attributes.push(ChangedAttribute {
+                element: element.clone(),
+                attribute: "metadata".to_string(),
+            });
+        }
         SemanticMutation::RenameDeclaration { element, new_name } => {
             let parent = element
                 .qualified_name

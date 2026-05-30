@@ -166,6 +166,22 @@ class ElementView:
     def references(self, name: str) -> list[Any]:
         return self._element.references(name)
 
+    def metadata(self) -> Any:
+        metadata = getattr(self._element, "metadata", None)
+        return metadata() if callable(metadata) else metadata
+
+    def metadata_by_type(self, type_name: str) -> list[Any]:
+        metadata_by_type = getattr(self._element, "metadata_by_type", None)
+        if callable(metadata_by_type):
+            return metadata_by_type(type_name)
+        metadata = self.metadata() or []
+        return [
+            item
+            for item in metadata
+            if getattr(item, "type_name", None) == type_name
+            or getattr(item, "type", None) == type_name
+        ]
+
     def effective_str(self, name: str) -> str | None:
         value = self.effective(name)
         return value if isinstance(value, str) else None
@@ -304,6 +320,12 @@ class SysML:
     @classmethod
     def bind(cls, model):
         return cls(model)
+
+    def elements_with_metadata(self, metadata_type: str) -> list[ElementView]:
+        query = getattr(self.model, "elements_with_metadata", None)
+        if callable(query):
+            return query(metadata_type)
+        return []
 "#
     )
 }

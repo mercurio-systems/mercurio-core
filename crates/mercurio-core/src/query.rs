@@ -4,7 +4,92 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 
+use crate::graph::Graph;
 use crate::ir::{KirDocument, KirElement};
+use crate::metadata::metadata_annotations_named;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequirementTrace {
+    pub relationship: String,
+    pub source: String,
+    pub target: String,
+}
+
+pub fn elements_with_metadata<'a>(
+    document: &'a KirDocument,
+    metadata_type: &str,
+) -> Vec<&'a KirElement> {
+    document
+        .elements
+        .iter()
+        .filter(|element| {
+            !metadata_annotations_named(&element.properties, metadata_type).is_empty()
+        })
+        .collect()
+}
+
+pub fn requirement_traces(
+    document: &KirDocument,
+    requirement_id: &str,
+) -> Result<Vec<RequirementTrace>, QueryError> {
+    let graph = Graph::from_document(document.clone())
+        .map_err(|err| QueryError::new(format!("failed to build graph: {err}")))?;
+    let requirement_node = graph
+        .node_id(requirement_id)
+        .ok_or_else(|| QueryError::new(format!("unknown requirement `{requirement_id}`")))?;
+    let mut traces = graph
+        .incoming_edges(requirement_node)
+        .filter(|edge| is_requirement_trace_relation(&edge.relation))
+        .filter_map(|edge| {
+            Some(RequirementTrace {
+                relationship: edge.relation.clone(),
+                source: graph.element_id(edge.source)?.to_string(),
+                target: graph.element_id(edge.target)?.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    for element in &document.elements {
+        for (property, value) in &element.properties {
+            if !is_requirement_trace_relation(property) {
+                continue;
+            }
+            if value_references(value, requirement_id) {
+                traces.push(RequirementTrace {
+                    relationship: property.clone(),
+                    source: element.id.clone(),
+                    target: requirement_id.to_string(),
+                });
+            }
+        }
+    }
+    traces.sort_by(|left, right| {
+        (&left.relationship, &left.source, &left.target).cmp(&(
+            &right.relationship,
+            &right.source,
+            &right.target,
+        ))
+    });
+    Ok(traces)
+}
+
+fn value_references(value: &Value, target: &str) -> bool {
+    match value {
+        Value::String(value) => value == target,
+        Value::Array(items) => items.iter().any(|item| value_references(item, target)),
+        Value::Object(items) => items.values().any(|item| value_references(item, target)),
+        _ => false,
+    }
+}
+
+fn is_requirement_trace_relation(relation: &str) -> bool {
+    let relation = relation.to_ascii_lowercase();
+    relation.contains("satisfy")
+        || relation.contains("satisfied")
+        || relation.contains("verify")
+        || relation.contains("verified")
+        || relation.contains("refine")
+        || relation.contains("refined")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Query {
@@ -941,6 +1026,66 @@ mod tests {
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0]["type"], "type.Demo.Vehicle");
         assert_eq!(result.rows[0]["feature"], "feature.Demo.Vehicle.mass");
+    }
+
+    #[test]
+    fn finds_elements_with_metadata() {
+        let document = KirDocument {
+            metadata: Default::default(),
+            elements: vec![KirElement {
+                id: "requirement.Demo.safeStart".to_string(),
+                kind: "RequirementUsage".to_string(),
+                layer: 2,
+                properties: [(
+                    "metadata".to_string(),
+                    serde_json::json!({
+                        "ReviewTag": {
+                            "properties": {
+                                "status": "draft"
+                            }
+                        }
+                    }),
+                )]
+                .into_iter()
+                .collect(),
+            }],
+        };
+
+        let matches = elements_with_metadata(&document, "ReviewTag");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, "requirement.Demo.safeStart");
+    }
+
+    #[test]
+    fn requirement_trace_query_returns_incoming_verify_edges() {
+        let document = KirDocument {
+            metadata: Default::default(),
+            elements: vec![
+                KirElement {
+                    id: "req.safeStart".to_string(),
+                    kind: "RequirementUsage".to_string(),
+                    layer: 2,
+                    properties: Default::default(),
+                },
+                KirElement {
+                    id: "case.verifySafeStart".to_string(),
+                    kind: "VerificationCaseUsage".to_string(),
+                    layer: 2,
+                    properties: [(
+                        "verified_requirement".to_string(),
+                        serde_json::json!("req.safeStart"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ],
+        };
+
+        let traces = requirement_traces(&document, "req.safeStart").unwrap();
+
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].source, "case.verifySafeStart");
     }
 
     #[test]

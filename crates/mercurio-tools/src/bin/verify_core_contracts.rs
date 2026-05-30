@@ -1,7 +1,12 @@
+use std::collections::BTreeMap;
+
 use mercurio_core::{
-    CURRENT_DEFAULT_PROFILE_ID, Graph, KirDocument, LocalPackageRepository, SemanticConcept,
+    CURRENT_DEFAULT_PROFILE_ID, CoreMutationFeasibilityService, ElementRef, Graph, KirDocument,
+    KirElement, LocalPackageRepository, MutationContext, MutationFeasibilityService,
+    MutationProposal, SemanticConcept, SemanticMutation, compile_sysml_text,
     default_language_profile, default_metamodel_registry, default_stdlib_path, diff_kir_documents,
-    generate_python_wrappers, load_language_profile, workspace_revision_for_kir_document,
+    elements_with_metadata, generate_python_wrappers, load_authoring_project_from_sysml,
+    load_language_profile, requirement_traces, workspace_revision_for_kir_document,
 };
 
 fn main() {
@@ -85,6 +90,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ),
     )?;
 
+    verify_metadata_round_trip()?;
+
     println!("core contracts: ok");
     Ok(())
 }
@@ -96,4 +103,101 @@ fn check(condition: bool, message: String) -> Result<(), Box<dyn std::error::Err
     } else {
         Err(format!("FAILED {message}").into())
     }
+}
+
+fn verify_metadata_round_trip() -> Result<(), Box<dyn std::error::Error>> {
+    let source = r#"
+package Demo {
+  metadata def ReviewTag {
+    attribute status : String;
+    attribute owner : String;
+  }
+
+  requirement safeStart;
+}
+"#;
+    let project = load_authoring_project_from_sysml(BTreeMap::from([(
+        "model.sysml".to_string(),
+        source.to_string(),
+    )]))?;
+    let context = MutationContext::from_project(project);
+    let proposal = MutationProposal {
+        intent: "tag requirement metadata".to_string(),
+        affected_elements: vec![ElementRef::new("Demo.safeStart")],
+        operations: vec![SemanticMutation::AddMetadataAnnotation {
+            element: ElementRef::new("Demo.safeStart"),
+            metadata_type: "ReviewTag".to_string(),
+            properties: BTreeMap::from([
+                ("owner".to_string(), "Safety Team".to_string()),
+                ("status".to_string(), "draft".to_string()),
+            ]),
+        }],
+        evidence: Vec::new(),
+        rationale: None,
+        workspace_revision: context.workspace_revision.clone(),
+    };
+    let service = CoreMutationFeasibilityService::new();
+    let report = service.check(&context, &proposal);
+    check(
+        report.normalized_plan.is_some(),
+        "metadata annotation mutation normalizes".to_string(),
+    )?;
+    let applied = service
+        .apply_checked_plan(
+            &context,
+            report.normalized_plan.as_ref().expect("checked above"),
+        )
+        .map_err(|issue| issue.message)?;
+    let edited = applied
+        .edited_files
+        .get("model.sysml")
+        .ok_or("metadata mutation did not edit model.sysml")?;
+    let stdlib = KirDocument::from_path(&default_stdlib_path())?;
+    let document = compile_sysml_text(edited, "model.sysml", &stdlib)?;
+    check(
+        elements_with_metadata(&document, "ReviewTag")
+            .iter()
+            .any(|element| element.id == "requirement.Demo.safeStart"),
+        "metadata annotation round-trips through SysML source".to_string(),
+    )?;
+    check(
+        applied
+            .semantic_diff
+            .changed_attributes
+            .iter()
+            .any(|change| {
+                change.element == ElementRef::new("Demo.safeStart")
+                    && change.attribute == "metadata"
+            }),
+        "metadata mutation reports semantic diff".to_string(),
+    )?;
+
+    let trace_document = KirDocument {
+        metadata: BTreeMap::new(),
+        elements: vec![
+            KirElement {
+                id: "req.safeStart".to_string(),
+                kind: "RequirementUsage".to_string(),
+                layer: 2,
+                properties: BTreeMap::new(),
+            },
+            KirElement {
+                id: "case.verifySafeStart".to_string(),
+                kind: "VerificationCaseUsage".to_string(),
+                layer: 2,
+                properties: BTreeMap::from([(
+                    "verified_requirement".to_string(),
+                    serde_json::json!("req.safeStart"),
+                )]),
+            },
+        ],
+    };
+    check(
+        requirement_traces(&trace_document, "req.safeStart")?
+            .iter()
+            .any(|trace| trace.source == "case.verifySafeStart"),
+        "requirement trace query follows verification relationships".to_string(),
+    )?;
+
+    Ok(())
 }

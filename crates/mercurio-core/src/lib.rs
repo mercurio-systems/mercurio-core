@@ -21,6 +21,7 @@ pub mod mpack;
 pub mod mutation;
 pub mod outline;
 pub mod paths;
+pub mod performance;
 pub mod plugin_registry;
 pub mod project;
 pub mod project_cache;
@@ -155,6 +156,10 @@ pub use paths::{
     default_package_repo_path, default_stdlib_path, default_stdlib_rulepack_path,
     default_user_config_path, default_workspace_root, repo_path, repo_root,
 };
+pub use performance::{
+    CoreScalabilityMetricConfig, CoreScalabilityReport, CoreScalabilityScenarioReport,
+    CoreScalabilityTimings, SemanticDiffSummary, TimingMetric, run_core_scalability_metric,
+};
 pub use plugin_registry::{
     InstalledMpack, MpackActivationIndex, MpackAssetRef,
     PluginInstallSource as RegistryPluginInstallSource, PluginRegistryError,
@@ -180,7 +185,8 @@ pub use proposal::{
 pub use python_codegen::{PythonWrapperGeneration, generate_python_wrappers};
 pub use query::{
     FilterExpr, OrderBy, Projection, Query, QueryEngine, QueryError, QueryResultSet, QuerySource,
-    SortDirection, TermPattern, TriplePattern, parse_query,
+    RequirementTrace, SortDirection, TermPattern, TriplePattern, elements_with_metadata,
+    parse_query, requirement_traces,
 };
 pub use runtime::{ExecutionContext, QueryResult, Runtime, RuntimeArtifact, RuntimeError};
 pub use semantic_compare::{
