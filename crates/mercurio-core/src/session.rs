@@ -52,6 +52,7 @@ pub struct ModelFork {
 pub struct KirOverlay {
     pub added_elements: BTreeMap<String, KirElement>,
     pub updated_properties: BTreeMap<String, BTreeMap<String, Value>>,
+    pub added_members: BTreeMap<String, Vec<String>>,
     pub removed_elements: BTreeSet<String>,
     operations: Vec<ForkOperation>,
 }
@@ -594,6 +595,7 @@ impl ModelFork {
     fn can_use_mutator_plan(&self) -> bool {
         self.base.source_project.is_some()
             && self.overlay.added_elements.is_empty()
+            && self.overlay.added_members.is_empty()
             && self.overlay.removed_elements.is_empty()
             && !self.overlay.operations.is_empty()
             && self
@@ -607,12 +609,7 @@ impl ModelFork {
     fn render_generated_companion_files(&self) -> Result<BTreeMap<String, String>, SessionError> {
         let overlay_document = KirDocument {
             metadata: BTreeMap::new(),
-            elements: self
-                .overlay
-                .added_elements
-                .values()
-                .cloned()
-                .collect::<Vec<_>>(),
+            elements: self.overlay.added_elements_with_member_patches(),
         };
         let project = AuthoringProject::from_kir_document(&overlay_document)?;
         let mut rendered = BTreeMap::new();
@@ -727,42 +724,12 @@ impl ModelFork {
     }
 
     fn patch_member(&mut self, owner_id: &str, member_id: &str) {
-        let updates = self
+        let members = self
             .overlay
-            .updated_properties
+            .added_members
             .entry(owner_id.to_string())
             .or_default();
-        let mut members = updates
-            .get("members")
-            .cloned()
-            .or_else(|| {
-                self.overlay
-                    .added_elements
-                    .get(owner_id)
-                    .and_then(|element| element.properties.get("members").cloned())
-            })
-            .or_else(|| {
-                self.base
-                    .kir
-                    .elements
-                    .iter()
-                    .find(|element| element.id == owner_id)
-                    .and_then(|element| element.properties.get("members").cloned())
-            })
-            .and_then(|value| value.as_array().cloned())
-            .unwrap_or_default();
-        if !members
-            .iter()
-            .any(|value| value.as_str() == Some(member_id))
-        {
-            members.push(Value::String(member_id.to_string()));
-        }
-        updates.insert("members".to_string(), Value::Array(members.clone()));
-        if let Some(element) = self.overlay.added_elements.get_mut(owner_id) {
-            element
-                .properties
-                .insert("members".to_string(), Value::Array(members));
-        }
+        members.push(member_id.to_string());
     }
 }
 
@@ -779,10 +746,12 @@ impl KirOverlay {
                     element.properties.insert(key.clone(), value.clone());
                 }
             }
+            self.apply_added_members(&mut element);
             elements.push(element);
         }
-        for element in self.added_elements.values() {
-            elements.push(element.clone());
+        for mut element in self.added_elements.values().cloned() {
+            self.apply_added_members(&mut element);
+            elements.push(element);
         }
         elements.sort_by(|left, right| left.id.cmp(&right.id));
         let document = KirDocument {
@@ -796,8 +765,43 @@ impl KirOverlay {
     pub fn is_empty(&self) -> bool {
         self.added_elements.is_empty()
             && self.updated_properties.is_empty()
+            && self.added_members.is_empty()
             && self.removed_elements.is_empty()
             && self.operations.is_empty()
+    }
+
+    fn added_elements_with_member_patches(&self) -> Vec<KirElement> {
+        self.added_elements
+            .values()
+            .cloned()
+            .map(|mut element| {
+                self.apply_added_members(&mut element);
+                element
+            })
+            .collect()
+    }
+
+    fn apply_added_members(&self, element: &mut KirElement) {
+        let Some(added) = self.added_members.get(&element.id) else {
+            return;
+        };
+        let mut members = element
+            .properties
+            .get("members")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for member_id in added {
+            if !members
+                .iter()
+                .any(|value| value.as_str() == Some(member_id.as_str()))
+            {
+                members.push(Value::String(member_id.clone()));
+            }
+        }
+        element
+            .properties
+            .insert("members".to_string(), Value::Array(members));
     }
 }
 
@@ -957,6 +961,7 @@ fn doc_metadata(text: String) -> Value {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Instant;
 
     use crate::authoring::load_authoring_project_from_sysml;
 
@@ -997,6 +1002,31 @@ mod tests {
         assert_eq!(fork.overlay().added_elements.len(), 10_001);
         assert_eq!(snapshot.kir.elements.len(), 0);
         assert_eq!(fork.materialize().unwrap().elements.len(), 10_001);
+    }
+
+    #[test]
+    fn fork_overlay_bulk_requirement_addition_is_linear_enough() {
+        let snapshot = Arc::new(WorkspaceSnapshot::new(empty_document()).unwrap());
+        let session = snapshot.session();
+        let mut fork = session.fork("bulk requirements timing");
+        let package = fork.package("SyntheticRequirements", None).unwrap();
+
+        let started = Instant::now();
+        for index in 0..10_000 {
+            fork.requirement(
+                &package,
+                format!("Req{index:05}"),
+                format!("Generated requirement {index:05}"),
+            )
+            .unwrap();
+        }
+        let elapsed = started.elapsed();
+
+        assert_eq!(fork.overlay().added_elements.len(), 10_001);
+        assert!(
+            elapsed.as_secs_f64() < 2.0,
+            "adding 10k requirements to an overlay took {elapsed:?}"
+        );
     }
 
     #[test]
