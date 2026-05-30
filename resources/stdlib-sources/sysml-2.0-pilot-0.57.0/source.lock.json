@@ -1,0 +1,14 @@
+{
+  "schema": "dev.mercurio.stdlib-source-lock.v1",
+  "source_id": "sysml-2.0-pilot-0.57.0",
+  "source_kind": "pilot-stdlib-export",
+  "pilot_version": "0.57.0-SNAPSHOT",
+  "pilot_git_describe": "2026-03-1-g5694b8a81-dirty",
+  "pilot_commit": "5694b8a813c3",
+  "pilot_dirty": true,
+  "export_path": "resources/stdlib-sources/sysml-2.0-pilot-0.57.0/pilot-stdlib-export.json",
+  "export_sha256": "f40a301d314b8c05d8eb5a53055ec18c2f2e144c27ff541458409f7563aa4395",
+  "export_size_bytes": 16300816,
+  "source_exported_at_utc": "2026-04-28T15:18:03.627426400Z",
+  "library_root": "../SysML-v2-Pilot-Implementation/sysml.library"
+}

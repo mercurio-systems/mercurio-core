@@ -1,14 +1,17 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-const DEFAULT_STDLIB_RELATIVE_PATH: &str = "resources/stdlib.full.kir.json";
-const DEFAULT_STDLIB_RULEPACK_RELATIVE_PATH: &str = "resources/stdlib.rulepack.json";
+const DEFAULT_STDLIB_RELATIVE_PATH: &str =
+    "resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json";
+const DEFAULT_STDLIB_RULEPACK_RELATIVE_PATH: &str =
+    "resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.rulepack.json";
 const DEFAULT_LANGUAGE_PROFILE_ROOT_RELATIVE_PATH: &str = "resources/language-profiles";
 const DEFAULT_BUNDLED_PACKAGE_REPO_RELATIVE_PATH: &str = "packages";
-const DEFAULT_BUNDLED_STDLIB_PACKAGE_SET_RELATIVE_PATH: &str = "examples/sysml.library.kpar";
+const DEFAULT_BUNDLED_STDLIB_PACKAGE_SET_RELATIVE_PATH: &str =
+    "resources/stdlib-sources/sysml-2.0-pilot-0.57.0/sysml.library.kpar";
 const REPO_SENTINELS: [&str; 3] = [
-    "resources/stdlib.full.kir.json",
-    "mappings/l2/pilot_constructs.seed.json",
+    "resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json",
+    "packages/org.omg/sysml-stdlib/2.0.0/manifest.json",
     "Cargo.toml",
 ];
 

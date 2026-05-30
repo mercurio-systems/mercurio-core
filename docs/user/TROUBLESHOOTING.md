@@ -44,7 +44,7 @@ Most commands use the bundled standard library by default.
 Use `--stdlib PATH` to override it:
 
 ```powershell
-mercurio compile --file model.sysml --stdlib resources/stdlib.full.kir.json
+mercurio compile --file model.sysml --stdlib resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json
 ```
 
 If results differ between runs, check whether the command is using a project descriptor, a bundled stdlib, or an explicit `--stdlib` path.

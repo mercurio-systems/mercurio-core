@@ -1,0 +1,63 @@
+{
+  "schema": "dev.mercurio.stdlib-release-lock.v1",
+  "spec_version": "2.0.0",
+  "source_id": "sysml-2.0-pilot-0.57.0",
+  "profile_id": "sysml-2.0-pilot-0.57.0",
+  "stdlib_package": "org.omg/sysml-stdlib",
+  "mpack_id": "org.mercurio.sysml-stdlib-support",
+  "mpack_version": "2.0.0",
+  "wrapper_module": "mercurio_sysml_2_0",
+  "mercurio_tools_version": "0.1.0",
+  "release_root": "artifacts/stdlib/sysml-2.0.0/sysml-2.0-pilot-0.57.0",
+  "source": {
+    "raw_export": {
+      "path": "raw/pilot-stdlib-export.json",
+      "digest": "fnv1a64:67e3dc2e5e7b4ea1"
+    },
+    "raw_export_sha256": "f40a301d314b8c05d8eb5a53055ec18c2f2e144c27ff541458409f7563aa4395"
+  },
+  "profile": {
+    "profile": {
+      "path": "profiles/sysml-2.0-pilot-0.57.0/profile.json",
+      "digest": "fnv1a64:2b646f06c567757a"
+    },
+    "mappings": {
+      "path": "profiles/sysml-2.0-pilot-0.57.0/mappings",
+      "digest": "fnv1a64:743e7666f58903f9"
+    }
+  },
+  "artifacts": {
+    "kir": {
+      "path": "kir/stdlib.full.kir.json",
+      "digest": "fnv1a64:d2eaaba5049a612b"
+    },
+    "kpar": {
+      "path": "kpar/sysml-stdlib-2.0.0.kpar",
+      "digest": "fnv1a64:f460a003725ad24e"
+    },
+    "mpack": {
+      "path": "mpack/org.mercurio.sysml-stdlib-support-2.0.0.mpack",
+      "digest": "fnv1a64:dfe3c8c7fa9c7e33"
+    },
+    "profile": {
+      "path": "profiles/sysml-2.0-pilot-0.57.0/profile.json",
+      "digest": "fnv1a64:2b646f06c567757a"
+    },
+    "profile_mappings": {
+      "path": "profiles/sysml-2.0-pilot-0.57.0/mappings",
+      "digest": "fnv1a64:743e7666f58903f9"
+    },
+    "python_wrappers": {
+      "path": "python",
+      "digest": "fnv1a64:d3ec56a433d8c46c"
+    },
+    "raw_export": {
+      "path": "raw/pilot-stdlib-export.json",
+      "digest": "fnv1a64:67e3dc2e5e7b4ea1"
+    },
+    "rulepack": {
+      "path": "rules/stdlib.rulepack.json",
+      "digest": "fnv1a64:fe275e340a408585"
+    }
+  }
+}

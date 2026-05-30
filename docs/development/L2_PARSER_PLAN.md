@@ -9,7 +9,7 @@ Load user `.sysml` files as L2 models without depending on a Java subprocess at 
 The runtime path remains:
 
 ```text
-resources/stdlib.full.kir.json + user_model.sysml
+resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json + user_model.sysml
                     ->
           Rust parser + transpiler
                     ->
@@ -80,7 +80,7 @@ So the final metaclass -> KIR mapping remains a Mercurio-owned file.
 
 ## Mapping Layers
 
-Use two mapping layers under `mappings/l2/`:
+Use two mapping layers under the active language profile's `mappings/` directory:
 
 1. `pilot_constructs.seed.json`
 
@@ -116,15 +116,15 @@ src/
     resolver.rs
     transpile.rs
     diagnostics.rs
-mappings/
-  l2/
+resources/language-profiles/<profile-id>/
+  mappings/
     README.md
     pilot_constructs.seed.json
     kir_emission.seed.json
 docs/
   development/
     L2_PARSER_PLAN.md
-fixtures/
+test_files/
   l2/
     minimal_vehicle.sysml
     minimal_vehicle.kir.json
@@ -225,7 +225,7 @@ That avoids collisions and gives deterministic ids.
 
 ### Phase 1
 
-- Add mapping files under `mappings/l2/`
+- Add mapping files under the active language profile's `mappings/` directory
 - Add parser design docs
 - Add AST and lexer skeletons
 - Add `parse_l2` binary
@@ -263,7 +263,7 @@ package Demo {
 ```
 
 2. Emit L2 KIR in memory.
-3. Merge with `resources/stdlib.full.kir.json`.
+3. Merge with `resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json`.
 4. Load in the existing runtime.
 5. Display the resulting L2 model in the current UI.
 
@@ -271,7 +271,7 @@ package Demo {
 
 - lexer tests for identifiers, keywords, punctuation
 - parser tests for `package`, `part def`, and typed `part`
-- transpiler snapshot tests against `fixtures/l2/*.kir.json`
+- transpiler snapshot tests against `test_files/l2/*.kir.json`
 - resolution tests for imported stdlib names
 - runtime integration tests loading `.sysml`
 

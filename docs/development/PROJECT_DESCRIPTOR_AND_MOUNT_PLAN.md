@@ -175,13 +175,13 @@ Current implemented provider kinds in `mercurio-core`:
 The current gap is package-set and API-backed resolution:
 
 - `kpar_file` works for one package archive
-- `package_set_directory` now resolves one root package plus its local `.project.json` `usage` dependency closure from a directory like [examples/sysml.library.kpar](/C:/dev/git/mercurio/ideation-m2/examples/sysml.library.kpar)
+- `package_set_directory` now resolves one root package plus its local `.project.json` `usage` dependency closure from a directory like [resources/stdlib-sources/sysml-2.0-pilot-0.57.0/sysml.library.kpar](/C:/dev/git/mercurio/ideation-m2/resources/stdlib-sources/sysml-2.0-pilot-0.57.0/sysml.library.kpar)
 - resolved descriptor/library metadata is surfaced through workspace status and semantic workspace session APIs for GUI testing
 - API-backed snapshot providers are still future work
 
 ## 13. Observed KPAR Structure
 
-The example package set at [examples/sysml.library.kpar](/C:/dev/git/mercurio/ideation-m2/examples/sysml.library.kpar) is not a single archive. It is a directory containing multiple package files such as:
+The example package set at [resources/stdlib-sources/sysml-2.0-pilot-0.57.0/sysml.library.kpar](/C:/dev/git/mercurio/ideation-m2/resources/stdlib-sources/sysml-2.0-pilot-0.57.0/sysml.library.kpar) is not a single archive. It is a directory containing multiple package files such as:
 
 - `Kernel_Data_Type_Library-1.0.0.kpar`
 - `Kernel_Function_Library-1.0.0.kpar`
@@ -232,7 +232,7 @@ For v1, the likely shape is:
 Two concrete examples now anchor the provider design:
 
 - local `kpar` package-set example:
-  [examples/sysml.library.kpar](/C:/dev/git/mercurio/ideation-m2/examples/sysml.library.kpar)
+  [resources/stdlib-sources/sysml-2.0-pilot-0.57.0/sysml.library.kpar](/C:/dev/git/mercurio/ideation-m2/resources/stdlib-sources/sysml-2.0-pilot-0.57.0/sysml.library.kpar)
 - remote API repository example:
   [Intercax API docs](http://sysml2.intercax.com:9000/docs/)
 

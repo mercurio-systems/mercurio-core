@@ -21,7 +21,7 @@ Implementation anchor:
 - `mercurio-core/src/ir.rs`: KIR document and element structs
 - `mercurio-core/src/graph.rs`: graph construction and reference discovery
 - `mercurio-core/src/frontend/transpile.rs`: source AST to KIR emission
-- `mappings/l2/kir_emission.seed.json`: metaclass-to-KIR emission rules for the L2 subset
+- `resources/language-profiles/<profile-id>/mappings/kir_emission.seed.json`: metaclass-to-KIR emission rules for the L2 subset
 
 ## Document Shape
 
@@ -33,7 +33,7 @@ A KIR document is a JSON object with:
 ```json
 {
   "metadata": {
-    "source": "fixtures/l2/minimal_vehicle.sysml"
+    "source": "test_files/l2/minimal_vehicle.sysml"
   },
   "elements": [
     {
@@ -200,7 +200,7 @@ Current source provenance commonly uses:
 ```json
 {
   "metadata": {
-    "source_file": "fixtures/l2/minimal_vehicle.sysml",
+    "source_file": "test_files/l2/minimal_vehicle.sysml",
     "source_span": {
       "start_line": 1,
       "start_col": 1,

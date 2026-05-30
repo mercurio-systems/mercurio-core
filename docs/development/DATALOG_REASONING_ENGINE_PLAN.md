@@ -32,7 +32,7 @@ SysML / KerML source
 The core crate now exposes an initial Datalog and derived-index slice:
 
 - `crates/mercurio-core/src/datalog.rs`: rule packs, facts, evaluation, graph fact extraction, and materialized core indexes.
-- `resources/stdlib.rulepack.json`: bundled rule-pack artifact.
+- `resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.rulepack.json`: bundled rule-pack artifact.
 - `Runtime`: loads default rule packs and carries derived indexes alongside graph state.
 - `assessment` and related semantic services can consume Datalog facts and rule evaluation.
 
@@ -219,7 +219,7 @@ Rule generation should happen only when the semantic environment changes, not on
 | Time | Generate | Notes |
 | --- | --- | --- |
 | Runtime or code build | core rule packs | Hand-authored, reviewed, tested, benchmarked |
-| Pilot stdlib import | metamodel adapter rule pack | Generated beside `resources/stdlib.kir.json` and keyed by stdlib hash |
+| Pilot stdlib import | metamodel adapter rule pack | Generated beside `resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.kir.json` and keyed by stdlib hash |
 | Native metamodel parse/import | metamodel adapter rule pack | Future replacement or supplement for Pilot-derived generation |
 | Workspace/project compile | facts only | Hot path; do not regenerate rules |
 | Profile/package load | optional validation/view packs | Named and versioned policy inputs |
@@ -228,8 +228,8 @@ Rule generation should happen only when the semantic environment changes, not on
 For the current repository, the first implementation should extend `crates/mercurio-tools/src/bin/import_pilot_stdlib.rs` so import produces both:
 
 ```text
-resources/stdlib.kir.json
-resources/stdlib.rulepack.json
+resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.kir.json
+resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.rulepack.json
 ```
 
 At workspace or server load:
@@ -285,7 +285,7 @@ Treat the current implementation as a narrow spike until these items are closed.
 Scope to harden:
 
 - keep the rule-pack artifact format stable enough for cache keys
-- keep Pilot stdlib import emitting `resources/stdlib.rulepack.json`
+- keep Pilot stdlib import emitting `resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.rulepack.json`
 - benchmark fact extraction and rule evaluation against representative workspaces
 - materialize and verify:
   - specialization closure

@@ -1198,7 +1198,8 @@ mod tests {
     #[test]
     fn extracts_requirement_rows_from_example_model() {
         let document =
-            KirDocument::from_path(&repo_path("examples/requirements_table_model.json")).unwrap();
+            KirDocument::from_path(&repo_path("test_files/examples/requirements_table_model.json"))
+                .unwrap();
         let runtime = Runtime::from_document(document).unwrap();
 
         let view = requirements_table_view(runtime.graph());

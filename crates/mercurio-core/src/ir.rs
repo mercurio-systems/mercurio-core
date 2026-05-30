@@ -46,7 +46,7 @@ mod tests {
     #[test]
     fn load_model_stack_accepts_kerml_sources() {
         let document = super::load_model_stack(&crate::paths::repo_path(
-            "fixtures/kerml/minimal_classifier.kerml",
+            "test_files/kerml/minimal_classifier.kerml",
         ))
         .unwrap();
 

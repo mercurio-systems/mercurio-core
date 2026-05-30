@@ -43,7 +43,7 @@ fn parse_kerml_examples_corpus() {
 fn compile_and_snapshot_kerml_examples_corpus() {
     let files = kerml_example_files();
     assert!(!files.is_empty(), "expected KerML example files");
-    let stdlib = KirDocument::from_path(&repo_path("resources/stdlib.full.kir.json")).unwrap();
+    let stdlib = KirDocument::from_path(&repo_path("resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json")).unwrap();
     let parsed_modules = files
         .iter()
         .map(|path| {
@@ -98,7 +98,7 @@ fn compile_and_snapshot_kerml_examples_corpus() {
 }
 
 fn kerml_example_files() -> Vec<PathBuf> {
-    let root = repo_path("examples/kerml/examples");
+    let root = repo_path("test_files/examples/kerml/examples");
     let mut files = Vec::new();
     collect_kerml_files(&root, &mut files);
     files.sort();

@@ -111,7 +111,7 @@ Later renderers:
 The first concrete non-diagram view is the requirements table projection:
 
 - implementation: `mercurio-core/src/views.rs`
-- example KIR: `examples/requirements_table_model.json`
+- example KIR: `test_files/examples/requirements_table_model.json`
 - exported API: `requirements_table_view(graph)`
 - persisted view kind: `table`, with the specific preset in `table.kind` such as `requirements`
 
@@ -346,7 +346,7 @@ Objectives:
 
 Exit criteria:
 
-- `requirements_table_view(graph)` returns stable rows for `examples/requirements_table_model.json`.
+- `requirements_table_view(graph)` returns stable rows for `test_files/examples/requirements_table_model.json`.
 - Projection code has no dependency on source syntax or UI state.
 
 ### Stage 2: Server API

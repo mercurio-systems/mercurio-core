@@ -263,7 +263,7 @@ fn default_workspace_root_for_open_path(open_path: &Path) -> PathBuf {
     } else if open_path.is_dir() {
         open_path.to_path_buf()
     } else {
-        crate::paths::repo_path("fixtures/l2")
+        crate::paths::repo_path("test_files/l2")
     }
 }
 

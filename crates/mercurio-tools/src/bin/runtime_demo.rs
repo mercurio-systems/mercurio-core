@@ -2,7 +2,7 @@ use mercurio_core::{ExecutionContext, Runtime, load_model_stack, repo_path};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let example_path = repo_path("examples/vehicle_model.json");
+    let example_path = repo_path("test_files/examples/vehicle_model.json");
     let document = load_model_stack(&example_path)?;
     let runtime = Runtime::from_document(document)?;
 

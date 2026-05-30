@@ -84,10 +84,10 @@ mercurio-core/
       src/
         lib.rs
 
-  examples/
-    kir/
-    sysml/
+  test_files/
+    examples/
     kerml/
+    l2/
 
   docs/
     CORE_REPO_LAYOUT.md

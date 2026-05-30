@@ -31,7 +31,7 @@ The repo already has the pieces needed to evolve toward this:
 - `mercurio-core/src/frontend/ast.rs` contains generic declaration, feature, package, import, alias, and expression nodes.
 - `mercurio-core/src/frontend/resolver.rs` resolves local names, imports, aliases, stdlib references, and expression paths.
 - `mercurio-core/src/frontend/transpile.rs` emits KIR through mapping data.
-- `mappings/l2/` separates construct and KIR emission policy from parser code.
+- `resources/language-profiles/<profile-id>/mappings/` separates construct and KIR emission policy from parser code.
 - `docs/development/PROJECT_DESCRIPTOR_AND_MOUNT_PLAN.md` already treats KPARs, libraries, baseline libraries, and source providers as separate concerns.
 
 The main gap is that the frontend is still organized as a SysML parser that happens to know some KerML-shaped concepts. Robust `.kerml` support requires making the KerML layer explicit and shared.
@@ -253,7 +253,7 @@ Exit criteria:
 
 Deliverables:
 
-- Add KerML construct mappings under `mappings/l2/`.
+- Add KerML construct mappings under the active language profile's `mappings/` directory.
 - Emit KIR for KerML packages, classifiers, features, relationships, ownership, memberships, specialization, subsetting, redefinition, and metadata.
 - Ensure emitted ids are stable and package-qualified.
 - Preserve source provenance in KIR metadata.

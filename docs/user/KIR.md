@@ -88,7 +88,7 @@ mercurio compile --file model.sysml --format json
 Compile with the bundled standard library:
 
 ```powershell
-mercurio compile --file model.sysml --stdlib resources/stdlib.full.kir.json --format json
+mercurio compile --file model.sysml --stdlib resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json --format json
 ```
 
 Compile a KPAR package:

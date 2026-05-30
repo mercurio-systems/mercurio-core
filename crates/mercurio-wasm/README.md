@@ -37,4 +37,4 @@ Main exports:
 - `runAssessment(document, spec)`
 - `new MercurioSession(options)`
 
-`options.stdlib` may provide a KIR stdlib document. If omitted, the module uses the embedded lightweight `resources/stdlib.kir.json`.
+`options.stdlib` may provide a KIR stdlib document. If omitted, the module uses the embedded lightweight `resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.kir.json`.

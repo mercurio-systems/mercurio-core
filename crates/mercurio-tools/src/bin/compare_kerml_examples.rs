@@ -170,7 +170,8 @@ struct PilotSyntaxSpanDocument {
 
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let mut pilot_root = default_pilot_root();
-    let mut examples_root = default_kerml_examples_root(repo_path("examples/kerml/examples"));
+    let mut examples_root =
+        default_kerml_examples_root(repo_path("test_files/examples/kerml/examples"));
     let mut relative_path = None;
     let mut output_path = repo_path("target/kerml_examples_compare.json");
     let args = env::args().skip(1).collect::<Vec<_>>();

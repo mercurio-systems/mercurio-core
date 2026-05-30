@@ -23,7 +23,7 @@ If `MERCURIO_PILOT_ROOT` is unset, Pilot-facing tools look under `MERCURIO_WORKS
 Dump parsed connection declarations and resolved usages for a SysML file:
 
 ```powershell
-cargo run -p mercurio-tools --bin inspect_connection -- "examples/src/examples/Simple Tests/ConnectionTest.sysml"
+cargo run -p mercurio-tools --bin inspect_connection -- "test_files/examples/src/examples/Simple Tests/ConnectionTest.sysml"
 ```
 
 ## Run The Runtime Demo
@@ -55,7 +55,7 @@ cargo run -p mercurio-tools --bin diagnose_examples
 Diagnose each top-level folder separately:
 
 ```powershell
-cargo run -p mercurio-tools --bin diagnose_examples -- --folders --root examples/src/examples --out target/example-diagnostics.json
+cargo run -p mercurio-tools --bin diagnose_examples -- --folders --root test_files/examples/src/examples --out target/example-diagnostics.json
 ```
 
 ## Benchmark Example Compilation
@@ -69,16 +69,32 @@ cargo run -p mercurio-tools --bin benchmark_examples -- --folders
 Benchmark the full examples tree as one workspace:
 
 ```powershell
-cargo run -p mercurio-tools --bin benchmark_examples -- --all --root examples/src/examples
+cargo run -p mercurio-tools --bin benchmark_examples -- --all --root test_files/examples/src/examples
 ```
 
 Benchmark incremental edited-file behavior:
 
 ```powershell
-cargo run -p mercurio-tools --bin benchmark_examples -- --edited --root examples/src/examples
+cargo run -p mercurio-tools --bin benchmark_examples -- --edited --root test_files/examples/src/examples
 ```
 
 ## Pilot Comparison Tools
+
+Audit the active language profile, frontend construct mappings, KIR emission
+rules, and stdlib references:
+
+```powershell
+cargo run -p mercurio-tools --bin audit_language_profile
+```
+
+Include Pilot Xtext grammar alignment when a Pilot checkout is available:
+
+```powershell
+cargo run -p mercurio-tools --bin audit_language_profile -- --pilot-root path/to/pilot
+```
+
+Use `--deny-warnings` when the audit is expected to be fully clean. Without it,
+warnings report drift but do not affect the exit code; errors always fail.
 
 Audit a Pilot corpus:
 
@@ -95,7 +111,7 @@ cargo run -p mercurio-tools --bin audit_pilot_corpus -- --corpus small --out tar
 Compare one KerML example:
 
 ```powershell
-cargo run -p mercurio-tools --bin compare_kerml_examples -- --examples-root examples/kerml/examples --relative-path "Vehicle Example/VehicleDefinitions.kerml" --pilot-root path/to/pilot --out target/kerml-compare.json
+cargo run -p mercurio-tools --bin compare_kerml_examples -- --examples-root test_files/examples/kerml/examples --relative-path "Vehicle Example/VehicleDefinitions.kerml" --pilot-root path/to/pilot --out target/kerml-compare.json
 ```
 
 `compare_kerml_examples` also honors `MERCURIO_EXAMPLES_ROOT`. If that variable points at the `mercurio-examples` repository root, the tool uses its `kerml/examples` folder.
@@ -111,11 +127,20 @@ cargo run -p mercurio-tools --bin compare_pilot_semantics -- --pilot-root path/t
 Import Pilot standard library export data into KIR:
 
 ```powershell
-cargo run -p mercurio-tools --bin import_pilot_stdlib -- --from-export path/to/pilot-stdlib-export.json --out resources/stdlib.kir.json
+cargo run -p mercurio-tools --bin import_pilot_stdlib -- --from-export path/to/pilot-stdlib-export.json --out resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.kir.json
 ```
 
 Or export directly from a Pilot checkout:
 
 ```powershell
-cargo run -p mercurio-tools --bin import_pilot_stdlib -- --pilot-root path/to/pilot --out resources/stdlib.kir.json
+cargo run -p mercurio-tools --bin import_pilot_stdlib -- --pilot-root path/to/pilot --out resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.kir.json
 ```
+
+For normal stdlib/profile release work, prefer the consolidated release builder:
+
+```powershell
+cargo run -p mercurio-tools --bin build_stdlib_release -- --from-export resources\stdlib-sources\sysml-2.0-pilot-0.57.0\pilot-stdlib-export.json --profile-id sysml-2.0-pilot-0.57.0 --source-id sysml-2.0-pilot-0.57.0 --check-reproducible --audit-profile
+```
+
+Add `--promote` after reviewing the generated release under `artifacts/` to
+update checked-in runtime resources and `release.lock.json`.

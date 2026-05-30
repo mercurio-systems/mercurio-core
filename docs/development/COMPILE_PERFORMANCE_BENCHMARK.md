@@ -9,25 +9,25 @@ Branch: `codex/performance-improv`
 Corpus root:
 
 ```text
-examples/src/examples
+test_files/examples/src/examples
 ```
 
 Benchmark command:
 
 ```powershell
-cargo run -q --bin benchmark_examples -- --folders --root examples/src/examples
+cargo run -q --bin benchmark_examples -- --folders --root test_files/examples/src/examples
 ```
 
 Whole-tree stress command:
 
 ```powershell
-cargo run -q --bin benchmark_examples -- --all --root examples/src/examples
+cargo run -q --bin benchmark_examples -- --all --root test_files/examples/src/examples
 ```
 
 Edited-file stress command:
 
 ```powershell
-cargo run -q --bin benchmark_examples -- --edited --root examples/src/examples
+cargo run -q --bin benchmark_examples -- --edited --root test_files/examples/src/examples
 ```
 
 The benchmark reports:
@@ -44,7 +44,7 @@ These runs include stdlib index caching, partial recovery capping, parse/context
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Simple Tests | 34 | 21,506 | 3,232 | 3,596 | 32 | 7 | 27 |
 | Vehicle Example | 4 | 81,730 | 3,992 | 3,963 | 27 | 1 | 3 |
-| examples/src/examples | 95 | 228,994 | 17,452 | 17,240 | 97 | 22 | 73 |
+| test_files/examples/src/examples | 95 | 228,994 | 17,452 | 17,240 | 97 | 22 | 73 |
 
 The warm scope path now reuses semantic compile results when every source path/content in the compile scope is unchanged. Focused runs reported semantic cache hits for every file on warm scope calls.
 
@@ -56,7 +56,7 @@ The edited-file benchmark loads a compiled workspace, runs an unchanged warm pro
 | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Simple Tests | 34 | ActionTest.sysml | 4,173 | 35 | 34 | 0 | 98 | 33 | 1 | 35 | 512 |
 | Vehicle Example | 4 | SysML v2 Spec Annex A SimpleVehicleModel.sysml | 4,839 | 31 | 4 | 0 | 3,311 | 2 | 2 | 6 | 512 |
-| examples/src/examples | 95 | Analysis Examples/AnalysisAnnotation.sysml | 18,213 | 98 | 95 | 0 | 107 | 94 | 1 | 96 | 512 |
+| test_files/examples/src/examples | 95 | Analysis Examples/AnalysisAnnotation.sysml | 18,213 | 98 | 95 | 0 | 107 | 94 | 1 | 96 | 512 |
 
 The semantic cache key now includes a direct-import dependency fingerprint instead of a whole-scope hash. Unrelated files keep hitting after a staged edit, while files that provide or directly depend on the edited package miss.
 
@@ -95,7 +95,7 @@ The current whole-tree result is included in the latest focused table above. The
 
 | Target | Files | Bytes | Cold workspace ms | Warm scope ms | Success | Failure |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| examples/src/examples | 95 | 228,994 | 19,939 | 15,896 | 22 | 73 |
+| test_files/examples/src/examples | 95 | 228,994 | 19,939 | 15,896 | 22 | 73 |
 
 The whole-tree result is a stress test, not a realistic project shape. It places independent example models into one shared context, which inflates cross-file context work and changes diagnostics.
 

@@ -537,7 +537,8 @@ mod tests {
 
     fn sample_runtime() -> Runtime {
         let document =
-            load_model_stack(&crate::paths::repo_path("examples/vehicle_model.json")).unwrap();
+            load_model_stack(&crate::paths::repo_path("test_files/examples/vehicle_model.json"))
+                .unwrap();
         Runtime::from_document(document).unwrap()
     }
 

@@ -4,6 +4,11 @@
   "version": "2.0.0",
   "kind": "kpar",
   "file": "sysml-stdlib-2.0.0.kpar",
-  "digest": "fnv1a64:2d86803a065b3166",
-  "created_at": "unix:1780061452"
+  "digest": "fnv1a64:f460a003725ad24e",
+  "created_at": "release:sysml-2.0-pilot-0.57.0",
+  "source": {
+    "kind": "stdlib-release",
+    "path": "kpar/sysml-stdlib-2.0.0.kpar",
+    "digest": "fnv1a64:f460a003725ad24e"
+  }
 }

@@ -29,8 +29,8 @@ compile_sysml_text
        -> lex
        -> Parser::parse
   -> MappingBundle::load
-       -> mappings/l2/pilot_constructs.seed.json
-       -> mappings/l2/kir_emission.seed.json
+       -> resources/language-profiles/<profile-id>/mappings/pilot_constructs.seed.json
+       -> resources/language-profiles/<profile-id>/mappings/kir_emission.seed.json
   -> resolve_module
   -> transpile_module
   -> KirDocument
@@ -45,8 +45,8 @@ Implementation anchors:
 - `crates/mercurio-core/src/frontend/resolver.rs`
 - `crates/mercurio-core/src/frontend/transpile.rs`
 - `crates/mercurio-core/src/ir.rs`
-- `mappings/l2/pilot_constructs.seed.json`
-- `mappings/l2/kir_emission.seed.json`
+- `resources/language-profiles/<profile-id>/mappings/pilot_constructs.seed.json`
+- `resources/language-profiles/<profile-id>/mappings/kir_emission.seed.json`
 
 ## Step 1: Tokenize Source Text
 
@@ -134,7 +134,7 @@ textual construct -> SysML/KerML metaclass -> KIR element shape
 
 ### Construct To Metaclass
 
-`mappings/l2/pilot_constructs.seed.json` maps parser construct names to SysML/KerML metaclasses. Examples:
+`resources/language-profiles/<profile-id>/mappings/pilot_constructs.seed.json` maps parser construct names to SysML/KerML metaclasses. Examples:
 
 ```json
 {
@@ -161,7 +161,7 @@ That means grammar-specific spelling is separated from semantic class identity.
 
 ### Metaclass To KIR
 
-`mappings/l2/kir_emission.seed.json` maps metaclasses to KIR kind, id template, and emitted properties. Example for part definitions:
+`resources/language-profiles/<profile-id>/mappings/kir_emission.seed.json` maps metaclasses to KIR kind, id template, and emitted properties. Example for part definitions:
 
 ```json
 {

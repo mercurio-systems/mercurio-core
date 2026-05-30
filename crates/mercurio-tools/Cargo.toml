@@ -44,9 +44,18 @@ path = "src/bin/runtime_demo.rs"
 name = "generate_sample_views"
 path = "src/bin/generate_sample_views.rs"
 
+[[bin]]
+name = "build_stdlib_release"
+path = "src/bin/build_stdlib_release.rs"
+
+[[bin]]
+name = "audit_language_profile"
+path = "src/bin/audit_language_profile.rs"
+
 [dependencies]
 mercurio-core = { path = "../mercurio-core" }
 mercurio-views = { path = "../mercurio-views" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 time.workspace = true
+zip.workspace = true

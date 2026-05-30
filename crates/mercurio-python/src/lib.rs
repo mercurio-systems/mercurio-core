@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use mercurio_core::{
-    AuthoringProject, ContainerSelector, KirDocument, Mutation, QualifiedName, WriteBackMode,
-    WriteBackResult, compile_sysml_text, create_empty_model, default_stdlib_path,
+    AuthoringProject, ContainerSelector, ElementView, Graph, KirDocument, MetamodelAttributeRegistry,
+    Mutation, QualifiedName, WriteBackMode, WriteBackResult, compile_sysml_text,
+    create_empty_model, default_language_profile, default_stdlib_path, generate_python_wrappers,
     load_authoring_project_from_sysml,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -37,6 +38,152 @@ impl PyWriteBackResult {
             "WriteBackResult(changed_files={:?}, mode={:?}, validation_ok={})",
             self.changed_files, self.mode, self.validation_ok
         )
+    }
+}
+
+#[pyclass(name = "SemanticModel")]
+#[derive(Clone)]
+struct PySemanticModel {
+    document: Arc<KirDocument>,
+    graph: Arc<Graph>,
+    registry: Arc<MetamodelAttributeRegistry>,
+}
+
+#[pymethods]
+impl PySemanticModel {
+    #[classmethod]
+    fn from_kir_json(_cls: &Bound<'_, PyType>, content: String) -> PyResult<Self> {
+        let document = KirDocument::from_str(&content)
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        py_semantic_model(document)
+    }
+
+    fn element(&self, element_id: String) -> PyResult<PyElementView> {
+        let node_id = self
+            .graph
+            .node_id(&element_id)
+            .ok_or_else(|| PyValueError::new_err(format!("element not found: {element_id}")))?;
+        Ok(PyElementView {
+            graph: self.graph.clone(),
+            registry: self.registry.clone(),
+            node_id,
+        })
+    }
+
+    fn elements(&self) -> Vec<PyElementView> {
+        self.graph
+            .elements()
+            .iter()
+            .map(|element| PyElementView {
+                graph: self.graph.clone(),
+                registry: self.registry.clone(),
+                node_id: element.id,
+            })
+            .collect()
+    }
+
+    fn element_count(&self) -> usize {
+        self.document.elements.len()
+    }
+
+    fn generate_python_wrappers(&self, module_name: String) -> PyResult<BTreeMap<String, String>> {
+        let profile = default_language_profile()
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+        Ok(generate_python_wrappers(&self.document, &profile, &module_name).files)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("SemanticModel(elements={})", self.document.elements.len())
+    }
+}
+
+#[pyclass(name = "ElementView")]
+#[derive(Clone)]
+struct PyElementView {
+    graph: Arc<Graph>,
+    registry: Arc<MetamodelAttributeRegistry>,
+    node_id: mercurio_core::NodeId,
+}
+
+#[pymethods]
+impl PyElementView {
+    #[getter]
+    fn id(&self) -> PyResult<String> {
+        Ok(self.view()?.id().to_string())
+    }
+
+    #[getter]
+    fn kind(&self) -> PyResult<String> {
+        Ok(self.view()?.kind().to_string())
+    }
+
+    #[getter]
+    fn layer(&self) -> PyResult<u8> {
+        Ok(self.view()?.layer())
+    }
+
+    fn metatype_id(&self) -> PyResult<Option<String>> {
+        Ok(self.view()?.metatype().map(|summary| summary.id))
+    }
+
+    fn get_json(&self, name: String) -> PyResult<Option<String>> {
+        self.view()?
+            .get(&name)
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))
+    }
+
+    fn effective_json(&self, name: String) -> PyResult<Option<String>> {
+        self.view()?
+            .effective(&name)
+            .map(|value| serde_json::to_string(&value))
+            .transpose()
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))
+    }
+
+    fn get_str(&self, name: String) -> PyResult<Option<String>> {
+        Ok(self.view()?.get_str(&name).map(str::to_string))
+    }
+
+    fn effective_str(&self, name: String) -> PyResult<Option<String>> {
+        Ok(self
+            .view()?
+            .effective(&name)
+            .and_then(|value| value.as_str().map(str::to_string)))
+    }
+
+    fn references(&self, relation: String) -> PyResult<Vec<PyElementView>> {
+        Ok(self
+            .view()?
+            .references(&relation)
+            .into_iter()
+            .map(|view| PyElementView {
+                graph: self.graph.clone(),
+                registry: self.registry.clone(),
+                node_id: view.node_id(),
+            })
+            .collect())
+    }
+
+    fn attribute_names(&self) -> PyResult<Vec<String>> {
+        Ok(self
+            .view()?
+            .attributes()
+            .map(|query| query.rows.into_iter().map(|row| row.name).collect())
+            .unwrap_or_default())
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let view = self.view()?;
+        Ok(format!("ElementView(id={:?}, kind={:?})", view.id(), view.kind()))
+    }
+}
+
+impl PyElementView {
+    fn view(&self) -> PyResult<ElementView<'_>> {
+        ElementView::new(&self.graph, &self.registry, self.node_id)
+            .ok_or_else(|| PyRuntimeError::new_err("stale element view"))
     }
 }
 
@@ -190,6 +337,10 @@ impl PyModelBuilder {
             .map_err(|err| PyRuntimeError::new_err(err.to_string()))
     }
 
+    fn compile_model(&self) -> PyResult<PySemanticModel> {
+        py_semantic_model(self.compile_document()?)
+    }
+
     fn validate(&mut self) -> PyResult<PyWriteBackResult> {
         let changed_files = if self.pending_changed_files.is_empty() {
             self.project
@@ -336,10 +487,23 @@ fn default_stdlib_document() -> PyResult<&'static KirDocument> {
         .map_err(|err| PyRuntimeError::new_err(err.clone()))
 }
 
+fn py_semantic_model(document: KirDocument) -> PyResult<PySemanticModel> {
+    let graph = Graph::from_document(document.clone())
+        .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+    let registry = MetamodelAttributeRegistry::build(&graph);
+    Ok(PySemanticModel {
+        document: Arc::new(document),
+        graph: Arc::new(graph),
+        registry: Arc::new(registry),
+    })
+}
+
 #[pymodule]
 fn mercurio_core_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyModelBuilder>()?;
     module.add_class::<PyWriteBackResult>()?;
+    module.add_class::<PySemanticModel>()?;
+    module.add_class::<PyElementView>()?;
     Ok(())
 }
 

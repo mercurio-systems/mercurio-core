@@ -22,7 +22,7 @@ mercurio package build --file model.sysml --out model.kpar
 Build a package from every `.sysml` and `.kerml` file under a directory:
 
 ```powershell
-mercurio package build --file examples/src/examples --out examples.kpar
+mercurio package build --file test_files/examples/src/examples --out examples.kpar
 ```
 
 Override package metadata:
@@ -42,7 +42,7 @@ When `document.kir.json` is present in a KPAR, Mercurio loads that precompiled K
 Package an existing KIR document directly:
 
 ```powershell
-mercurio package build --kir resources/stdlib.full.kir.json --name org.omg/sysml-stdlib --version 2.0.0
+mercurio package build --kir resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json --name org.omg/sysml-stdlib --version 2.0.0
 ```
 
 ## Local Package Repository
@@ -302,7 +302,7 @@ When a project omits a `role: "baseline"` library, Mercurio uses the default sta
 kpar:org.omg/sysml-stdlib:2.0.0
 ```
 
-That locator now follows the package convention too. Resolution first checks local, configured, and bundled package repositories. Mercurio ships a bundled package for `org.omg/sysml-stdlib:2.0.0` that contains `document.kir.json`. If no staged package is present, Mercurio resolves the bundled OMG package set at `examples/sysml.library.kpar`, using `Systems-Library.kpar` as the entry package. During migration, the legacy bundled KIR at `resources/stdlib.full.kir.json` remains the final fallback.
+That locator now follows the package convention too. Resolution first checks local, configured, and bundled package repositories. Mercurio ships a bundled package for `org.omg/sysml-stdlib:2.0.0` that contains `document.kir.json`. If no staged package is present, Mercurio resolves the bundled OMG package set at `resources/stdlib-sources/sysml-2.0-pilot-0.57.0/sysml.library.kpar`, using `Systems-Library.kpar` as the entry package. During migration, the legacy bundled KIR at `resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json` remains the final fallback.
 
 ## Compiled KIR Cache
 

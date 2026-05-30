@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-const DEFAULT_STDLIB: &str = include_str!("../../../resources/stdlib.kir.json");
+const DEFAULT_STDLIB: &str =
+    include_str!("../../../resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.kir.json");
 
 #[wasm_bindgen(start)]
 pub fn start() {

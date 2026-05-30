@@ -46,7 +46,7 @@ mercurio project new my-model --name "My Model"
 Lint a file:
 
 ```powershell
-mercurio lint --file "examples/src/examples/Simple Tests/PartTest.sysml"
+mercurio lint --file "test_files/examples/src/examples/Simple Tests/PartTest.sysml"
 ```
 
 Build and stage a KPAR package:
@@ -70,7 +70,7 @@ Use `--force` to scaffold into an existing non-empty directory and `--quiet` to 
 Parse one file and print a syntax summary:
 
 ```powershell
-mercurio parse --file "examples/src/examples/Simple Tests/PartTest.sysml"
+mercurio parse --file "test_files/examples/src/examples/Simple Tests/PartTest.sysml"
 ```
 
 Parse inline SysML:
@@ -82,7 +82,7 @@ mercurio parse --text "package Demo { part def Vehicle; }"
 Emit the syntax AST as JSON:
 
 ```powershell
-mercurio parse --file "examples/src/examples/Simple Tests/PartTest.sysml" --format json
+mercurio parse --file "test_files/examples/src/examples/Simple Tests/PartTest.sysml" --format json
 ```
 
 ## Compile To KIR
@@ -90,7 +90,7 @@ mercurio parse --file "examples/src/examples/Simple Tests/PartTest.sysml" --form
 Compile a file to KIR using the default standard library:
 
 ```powershell
-mercurio compile --file "examples/src/examples/Simple Tests/PartTest.sysml"
+mercurio compile --file "test_files/examples/src/examples/Simple Tests/PartTest.sysml"
 ```
 
 Emit the KIR document as JSON:
@@ -102,7 +102,7 @@ mercurio compile --text "package Demo { part def Vehicle; }" --format json
 Override the standard library:
 
 ```powershell
-mercurio compile --file model.sysml --stdlib resources/stdlib.full.kir.json
+mercurio compile --file model.sysml --stdlib resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.full.kir.json
 ```
 
 Compile source from a network URL:
@@ -151,25 +151,25 @@ Higher-level reasoning capabilities, such as behavioral simulation and requireme
 Lint one file:
 
 ```powershell
-mercurio lint --file "examples/src/examples/Simple Tests/PartTest.sysml"
+mercurio lint --file "test_files/examples/src/examples/Simple Tests/PartTest.sysml"
 ```
 
 Lint every `.sysml` and `.kerml` file under a directory:
 
 ```powershell
-mercurio lint --file "examples/src/examples/Simple Tests"
+mercurio lint --file "test_files/examples/src/examples/Simple Tests"
 ```
 
 Emit JSON diagnostics:
 
 ```powershell
-mercurio lint --file "examples/src/examples/Simple Tests" --format json
+mercurio lint --file "test_files/examples/src/examples/Simple Tests" --format json
 ```
 
 Fail when warnings are present, useful for CI:
 
 ```powershell
-mercurio lint --file "examples/src/examples/Simple Tests" --warnings-as-errors
+mercurio lint --file "test_files/examples/src/examples/Simple Tests" --warnings-as-errors
 ```
 
 ## KPAR Package Workflows

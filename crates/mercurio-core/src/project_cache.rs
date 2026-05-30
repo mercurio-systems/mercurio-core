@@ -442,34 +442,22 @@ fn digest_source_file_fingerprints(files: &[ProjectSourceFileFingerprint]) -> St
 }
 
 fn mapping_rules_digest() -> Result<String, KirError> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        return Ok(digest_labeled_chunks([
-            (
-                "mapping".as_bytes(),
-                include_bytes!("../../../mappings/l2/pilot_constructs.seed.json").as_slice(),
-            ),
-            (
-                "mapping".as_bytes(),
-                include_bytes!("../../../mappings/l2/kir_emission.seed.json").as_slice(),
-            ),
-        ]));
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let mut chunks = Vec::new();
-        for path in [
-            crate::paths::repo_path("mappings/l2/pilot_constructs.seed.json"),
-            crate::paths::repo_path("mappings/l2/kir_emission.seed.json"),
-        ] {
-            let bytes = std::fs::read(&path)?;
-            chunks.push(("mapping".as_bytes().to_vec(), bytes));
-        }
-        Ok(digest_labeled_chunks(chunks.iter().map(
-            |(label, bytes)| (label.as_slice(), bytes.as_slice()),
-        )))
-    }
+    Ok(digest_labeled_chunks([
+        (
+            "mapping".as_bytes(),
+            include_bytes!(
+                "../../../resources/language-profiles/sysml-2.0-pilot-0.57.0/mappings/pilot_constructs.seed.json"
+            )
+            .as_slice(),
+        ),
+        (
+            "mapping".as_bytes(),
+            include_bytes!(
+                "../../../resources/language-profiles/sysml-2.0-pilot-0.57.0/mappings/kir_emission.seed.json"
+            )
+            .as_slice(),
+        ),
+    ]))
 }
 
 fn compiler_digest() -> String {

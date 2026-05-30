@@ -15,7 +15,6 @@ use crate::frontend::resolver::{
 };
 use crate::ir::{KirDocument, KirElement};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::paths::repo_path;
 
 #[derive(Debug, Deserialize)]
 pub struct PilotConstructSeed {
@@ -289,26 +288,18 @@ impl MappingBundle {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
 fn load_pilot_constructs_seed() -> Result<String, Diagnostic> {
-    Ok(include_str!("../../../../mappings/l2/pilot_constructs.seed.json").to_string())
+    Ok(include_str!(
+        "../../../../resources/language-profiles/sysml-2.0-pilot-0.57.0/mappings/pilot_constructs.seed.json"
+    )
+    .to_string())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn load_pilot_constructs_seed() -> Result<String, Diagnostic> {
-    std::fs::read_to_string(repo_path("mappings/l2/pilot_constructs.seed.json"))
-        .map_err(|err| Diagnostic::new(format!("failed to read mapping file: {err}"), None))
-}
-
-#[cfg(target_arch = "wasm32")]
 fn load_kir_emission_seed() -> Result<String, Diagnostic> {
-    Ok(include_str!("../../../../mappings/l2/kir_emission.seed.json").to_string())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn load_kir_emission_seed() -> Result<String, Diagnostic> {
-    std::fs::read_to_string(repo_path("mappings/l2/kir_emission.seed.json"))
-        .map_err(|err| Diagnostic::new(format!("failed to read emission file: {err}"), None))
+    Ok(include_str!(
+        "../../../../resources/language-profiles/sysml-2.0-pilot-0.57.0/mappings/kir_emission.seed.json"
+    )
+    .to_string())
 }
 
 fn pascal_case(value: &str) -> String {

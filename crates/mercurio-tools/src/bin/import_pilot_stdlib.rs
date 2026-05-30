@@ -7,6 +7,7 @@ use mercurio_core::{
     Graph, PilotExportDocument, RulePack, default_stdlib_path, load_pilot_export,
     normalize_pilot_export, repo_path, repo_root,
 };
+use mercurio_tools::sha256_file;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -43,7 +44,7 @@ struct Args {
 }
 
 fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
-    let mut input_path = repo_path("fixtures/pilot_stdlib_export.json");
+    let mut input_path = None;
     let mut output_path = default_stdlib_path();
     let mut rulepack_output_path = default_rulepack_path(&output_path);
     let mut pilot_root = None;
@@ -55,7 +56,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
             "--from-export" => {
                 index += 1;
                 let value = args.get(index).ok_or("missing value for --from-export")?;
-                input_path = PathBuf::from(value);
+                input_path = Some(PathBuf::from(value));
             }
             "--out" => {
                 index += 1;
@@ -83,6 +84,14 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
         }
         index += 1;
     }
+
+    let input_path = match (input_path, pilot_root.as_ref()) {
+        (Some(input_path), _) => input_path,
+        (None, Some(_)) => repo_path("target/stdlib-release/pilot-stdlib-export.json"),
+        (None, None) => {
+            return Err("expected --from-export PATH or --pilot-root PATH".into());
+        }
+    };
 
     Ok(Args {
         input_path,
@@ -143,6 +152,10 @@ fn build_kir_metadata(
     metadata.insert(
         "input_export_path".to_string(),
         Value::String(metadata_path_string(input_path)),
+    );
+    metadata.insert(
+        "input_export_sha256".to_string(),
+        Value::String(sha256_file(input_path)?),
     );
 
     if let Some(pilot_root) = &args.pilot_root {

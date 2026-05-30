@@ -1,0 +1,340 @@
+{
+  "source": {
+    "kind": "pilot-corpus-seed",
+    "repo": "../SysML-v2-Pilot-Implementation",
+    "note": "Curated pilot-owned corpus tiers plus known cross-file support dependencies for audit resolution."
+  },
+  "corpora": {
+    "small": [
+      "sysml/src/examples/Simple Tests/ImportTest.sysml",
+      "sysml/src/examples/Simple Tests/ItemTest.sysml",
+      "sysml/src/examples/Simple Tests/PartTest.sysml",
+      "sysml/src/training/01. Packages/Package Example.sysml",
+      "sysml/src/training/02. Part Definitions/Part Definition Example.sysml"
+    ],
+    "core": [
+      "sysml/src/examples/Import Tests/PrivateImportTest.sysml",
+      "sysml/src/examples/Import Tests/QualifiedNameImportTest.sysml",
+      "sysml/src/examples/Simple Tests/ImportTest.sysml",
+      "sysml/src/examples/Simple Tests/ItemTest.sysml",
+      "sysml/src/examples/Simple Tests/PartTest.sysml",
+      "sysml/src/training/01. Packages/Package Example.sysml",
+      "sysml/src/training/02. Part Definitions/Part Definition Example.sysml",
+      "sysml/src/training/03. Generalization/Generalization Example.sysml",
+      "sysml/src/training/04. Subsetting/Subsetting Example.sysml",
+      "sysml/src/training/05. Redefinition/Redefinition Example.sysml",
+      "sysml/src/training/06. Enumeration Definitions/Enumeration Definitions-1.sysml",
+      "sysml/src/training/07. Parts/Parts Example-1.sysml",
+      "sysml/src/training/08. Items/Items Example.sysml",
+      "sysml/src/training/10. Ports/Port Example.sysml"
+    ],
+    "advanced": [
+      "sysml/src/training/11. Interfaces/Interface Example.sysml",
+      "sysml/src/training/12. Binding Connectors/Binding Connectors Example-1.sysml",
+      "sysml/src/training/13. Flows/Flow Usage Example.sysml",
+      "sysml/src/training/14. Action Definitions/Action Definition Example.sysml",
+      "sysml/src/training/15. Actions/Action Decomposition.sysml",
+      "sysml/src/training/23. State Definitions/State Definition Example-1.sysml",
+      "sysml/src/training/24. States/State Actions.sysml"
+    ],
+    "behavioral": [
+      "sysml/src/training/16. Conditional Succession/Conditional Succession Example-1.sysml",
+      "sysml/src/training/17. Control/Control Structures Example.sysml",
+      "sysml/src/training/18. Action Performance/Action Performance Example.sysml",
+      "sysml/src/training/21. Asynchronous Messaging/Messaging Example.sysml",
+      "sysml/src/training/25. Transitions/Transition Actions.sysml",
+      "sysml/src/training/26. State Exhibition/State Exhibition Example.sysml"
+    ],
+    "extended": [
+      "sysml/src/training/27. Occurrences/Event Occurrence Example.sysml",
+      "sysml/src/training/30. Calculations/Calculation Definitions.sysml",
+      "sysml/src/training/31. Constraints/Constraints Example-1.sysml",
+      "sysml/src/training/32. Requirements/Requirement Definitions.sysml",
+      "sysml/src/training/34. Verification/Verification Case Definition Example.sysml",
+      "sysml/src/training/35. Use Cases/Use Case Definition Example.sysml",
+      "sysml/src/training/37. Dependencies/Dependency Example.sysml",
+      "sysml/src/training/38. Allocation/Allocation Definition Example.sysml",
+      "sysml/src/training/39. Metadata/Metadata Example-1.sysml",
+      "sysml/src/training/42. Views/Viewpoint Example.sysml"
+    ]
+  },
+  "support_dependencies": {
+    "sysml/src/training/06. Enumeration Definitions/Enumeration Definitions-2.sysml": [
+      "sysml/src/training/06. Enumeration Definitions/Enumeration Definitions-1.sysml"
+    ],
+    "sysml/src/training/13. Flows/Flow Definition Example.sysml": [
+      "sysml/src/training/10. Ports/Port Example.sysml"
+    ],
+    "sysml/src/training/12. Binding Connectors/Binding Connectors Example-1.sysml": [
+      "sysml/src/training/10. Ports/Port Example.sysml"
+    ],
+    "sysml/src/training/13. Flows/Flow Interface Example.sysml": [
+      "sysml/src/training/10. Ports/Port Example.sysml"
+    ],
+    "sysml/src/training/13. Flows/Flow Usage Example.sysml": [
+      "sysml/src/training/10. Ports/Port Example.sysml"
+    ],
+    "sysml/src/training/11. Interfaces/Interface Example.sysml": [
+      "sysml/src/training/10. Ports/Port Example.sysml"
+    ],
+    "sysml/src/training/18. Action Performance/Action Performance Example.sysml": [
+      "sysml/src/training/15. Actions/Action Decomposition.sysml"
+    ],
+    "sysml/src/training/27. Occurrences/Interaction Example-2.sysml": [
+      "sysml/src/training/27. Occurrences/Event Occurrence Example.sysml"
+    ],
+    "sysml/src/training/27. Occurrences/Interaction Realization-1.sysml": [
+      "sysml/src/training/27. Occurrences/Event Occurrence Example.sysml",
+      "sysml/src/training/27. Occurrences/Interaction Example-1.sysml"
+    ],
+    "sysml/src/training/27. Occurrences/Interaction Realization-2.sysml": [
+      "sysml/src/training/27. Occurrences/Event Occurrence Example.sysml",
+      "sysml/src/training/27. Occurrences/Interaction Example-1.sysml"
+    ],
+    "sysml/src/training/27. Occurrences/Message Payload Example.sysml": [
+      "sysml/src/training/27. Occurrences/Event Occurrence Example.sysml"
+    ],
+    "sysml/src/training/28. Individuals/Individuals and Roles-1.sysml": [
+      "sysml/src/training/02. Part Definitions/Part Definition Example.sysml"
+    ],
+    "sysml/src/training/28. Individuals/Individuals and Snapshots Example.sysml": [
+      "sysml/src/training/02. Part Definitions/Part Definition Example.sysml"
+    ],
+    "sysml/src/training/28. Individuals/Individuals and Time Slices.sysml": [
+      "sysml/src/training/02. Part Definitions/Part Definition Example.sysml",
+      "sysml/src/training/28. Individuals/Individuals and Snapshots Example.sysml"
+    ],
+    "sysml/src/training/29. Expressions/Car Mass Rollup Example 1.sysml": [
+      "sysml/src/training/29. Expressions/MassRollup1.sysml"
+    ],
+    "sysml/src/training/29. Expressions/Car Mass Rollup Example 2.sysml": [
+      "sysml/src/training/29. Expressions/MassRollup2.sysml"
+    ],
+    "sysml/src/training/26. State Exhibition/State Exhibition Example.sysml": [
+      "sysml/src/training/25. Transitions/Transition Actions.sysml"
+    ],
+    "sysml/src/training/31. Constraints/Derivation Constraints.sysml": [
+      "sysml/src/training/31. Constraints/Constraints Example-1.sysml"
+    ],
+    "sysml/src/training/32. Requirements/Requirement Groups.sysml": [
+      "sysml/src/training/32. Requirements/Requirement Definitions.sysml",
+      "sysml/src/training/32. Requirements/Requirement Usages.sysml"
+    ],
+    "sysml/src/training/32. Requirements/Requirement Satisfaction.sysml": [
+      "sysml/src/training/32. Requirements/Requirement Definitions.sysml",
+      "sysml/src/training/32. Requirements/Requirement Groups.sysml"
+    ],
+    "sysml/src/training/32. Requirements/Requirement Usages.sysml": [
+      "sysml/src/training/32. Requirements/Requirement Definitions.sysml"
+    ],
+    "sysml/src/training/33. Analysis/Analysis Case Usage Example.sysml": [
+      "sysml/src/training/33. Analysis/Analysis Case Definition Example.sysml"
+    ],
+    "sysml/src/training/34. Verification/Verification Case Usage Example.sysml": [
+      "sysml/src/training/34. Verification/Verification Case Definition Example.sysml"
+    ],
+    "sysml/src/training/35. Use Cases/Use Case Usage Example.sysml": [
+      "sysml/src/training/35. Use Cases/Use Case Definition Example.sysml"
+    ],
+    "sysml/src/training/42. Views/Views Example.sysml": [
+      "sysml/src/training/42. Views/Viewpoint Example.sysml",
+      "sysml/src/training/40. Filtering/Filtering Example-2.sysml"
+    ]
+  },
+  "feature_tag_rules": [
+    {
+      "tag": "nested-package",
+      "mode": "package_count_gt_one"
+    },
+    {
+      "tag": "quoted-name",
+      "mode": "contains",
+      "needle": "'"
+    },
+    {
+      "tag": "import",
+      "mode": "term",
+      "needle": "import"
+    },
+    {
+      "tag": "wildcard-import",
+      "mode": "contains",
+      "needle": "::*"
+    },
+    {
+      "tag": "visibility",
+      "mode": "any_term",
+      "needles": ["private", "public", "protected"]
+    },
+    {
+      "tag": "alias",
+      "mode": "term",
+      "needle": "alias"
+    },
+    {
+      "tag": "item",
+      "mode": "term",
+      "needle": "item"
+    },
+    {
+      "tag": "port",
+      "mode": "term",
+      "needle": "port"
+    },
+    {
+      "tag": "attribute",
+      "mode": "term",
+      "needle": "attribute"
+    },
+    {
+      "tag": "specialization-shorthand",
+      "mode": "contains",
+      "needle": ":>"
+    },
+    {
+      "tag": "specializes",
+      "mode": "term",
+      "needle": "specializes"
+    },
+    {
+      "tag": "subsets",
+      "mode": "term",
+      "needle": "subsets"
+    },
+    {
+      "tag": "redefines",
+      "mode": "term",
+      "needle": "redefines"
+    },
+    {
+      "tag": "action",
+      "mode": "term",
+      "needle": "action"
+    },
+    {
+      "tag": "accept",
+      "mode": "term",
+      "needle": "accept"
+    },
+    {
+      "tag": "state",
+      "mode": "term",
+      "needle": "state"
+    },
+    {
+      "tag": "interface",
+      "mode": "term",
+      "needle": "interface"
+    },
+    {
+      "tag": "binding",
+      "mode": "term",
+      "needle": "bind"
+    },
+    {
+      "tag": "flow",
+      "mode": "term",
+      "needle": "flow"
+    },
+    {
+      "tag": "perform",
+      "mode": "term",
+      "needle": "perform"
+    },
+    {
+      "tag": "send",
+      "mode": "term",
+      "needle": "send"
+    },
+    {
+      "tag": "transition",
+      "mode": "term",
+      "needle": "transition"
+    },
+    {
+      "tag": "occurrence",
+      "mode": "contains",
+      "needle": "occurrence"
+    },
+    {
+      "tag": "calc",
+      "mode": "term",
+      "needle": "calc"
+    },
+    {
+      "tag": "constraint",
+      "mode": "term",
+      "needle": "constraint"
+    },
+    {
+      "tag": "requirement",
+      "mode": "term",
+      "needle": "requirement"
+    },
+    {
+      "tag": "verification",
+      "mode": "term",
+      "needle": "verification"
+    },
+    {
+      "tag": "use-case",
+      "mode": "contains_all",
+      "needles": ["use", "case"]
+    },
+    {
+      "tag": "dependency",
+      "mode": "term",
+      "needle": "dependency"
+    },
+    {
+      "tag": "allocation",
+      "mode": "term",
+      "needle": "allocation"
+    },
+    {
+      "tag": "metadata",
+      "mode": "term",
+      "needle": "metadata"
+    },
+    {
+      "tag": "view",
+      "mode": "any_term",
+      "needles": ["viewpoint", "view"]
+    },
+    {
+      "tag": "concern",
+      "mode": "term",
+      "needle": "concern"
+    },
+    {
+      "tag": "actor",
+      "mode": "term",
+      "needle": "actor"
+    },
+    {
+      "tag": "stakeholder",
+      "mode": "term",
+      "needle": "stakeholder"
+    },
+    {
+      "tag": "if",
+      "mode": "term",
+      "needle": "if"
+    },
+    {
+      "tag": "loop",
+      "mode": "term",
+      "needle": "loop"
+    },
+    {
+      "tag": "exhibit",
+      "mode": "term",
+      "needle": "exhibit"
+    },
+    {
+      "tag": "multiplicity-or-index",
+      "mode": "contains_all",
+      "needles": ["[", "]"]
+    }
+  ]
+}

@@ -335,7 +335,7 @@ pub fn load_default_rulepacks() -> Result<Vec<RulePack>, DatalogError> {
     #[cfg(target_arch = "wasm32")]
     {
         return Ok(vec![RulePack::from_str(include_str!(
-            "../../../resources/stdlib.rulepack.json"
+            "../../../resources/stdlib-sources/sysml-2.0-pilot-0.57.0/stdlib.rulepack.json"
         ))?]);
     }
 

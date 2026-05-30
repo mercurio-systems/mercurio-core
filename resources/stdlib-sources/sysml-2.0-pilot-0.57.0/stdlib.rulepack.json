@@ -1,0 +1,29 @@
+{
+  "id": "mercurio.metamodel.adapter",
+  "version": "0.1.0",
+  "metadata": {
+    "description": "Generated metamodel adapter facts for stable Mercurio predicates",
+    "elementCount": 10262
+  },
+  "facts": [
+    {
+      "predicate": "relationship_kind",
+      "terms": [
+        "SatisfyRequirementUsage",
+        "satisfy"
+      ]
+    },
+    {
+      "predicate": "requirement_kind",
+      "terms": [
+        "RequirementDefinition"
+      ]
+    },
+    {
+      "predicate": "requirement_kind",
+      "terms": [
+        "RequirementUsage"
+      ]
+    }
+  ]
+}

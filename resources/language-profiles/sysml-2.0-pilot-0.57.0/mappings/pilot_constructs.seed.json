@@ -1,0 +1,841 @@
+{
+  "source": {
+    "kind": "pilot-grammar-seed",
+    "repo": "../SysML-v2-Pilot-Implementation",
+    "sysml_grammar": "org.omg.sysml.xtext/src/org/omg/sysml/xtext/SysML.xtext",
+    "kerml_grammar": "org.omg.kerml.xtext/src/org/omg/kerml/xtext/KerML.xtext",
+    "note": "This seed was transcribed from pilot Xtext grammar rules that declare `returns SysML::...` or `returns KerML::...`."
+  },
+  "keyword_registry": {
+    "definitions": {
+      "action": "ActionDefinition",
+      "allocation": "AllocationDefinition",
+      "analysis": "AnalysisCaseDefinition",
+      "attribute": "AttributeDefinition",
+      "calc": "CalculationDefinition",
+      "class": "Classifier",
+      "classifier": "Classifier",
+      "assoc": "Classifier",
+      "behavior": "Classifier",
+      "comment": "CommentDefinition",
+      "concern": "ConcernDefinition",
+      "connection": "ConnectionDefinition",
+      "constraint": "ConstraintDefinition",
+      "enum": "EnumerationDefinition",
+      "feature": "FeatureDefinition",
+      "flow": "FlowDefinition",
+      "individual": "IndividualDefinition",
+      "interface": "InterfaceDefinition",
+      "item": "ItemDefinition",
+      "metadata": "MetadataDefinition",
+      "occurrence": "OccurrenceDefinition",
+      "part": "PartDefinition",
+      "port": "PortDefinition",
+      "requirement": "RequirementDefinition",
+      "rendering": "RenderingDefinition",
+      "scenario": "ScenarioDefinition",
+      "state": "StateDefinition",
+      "struct": "Classifier",
+      "datatype": "Classifier",
+      "metaclass": "Classifier",
+      "use-case": "UseCaseDefinition",
+      "verification": "VerificationCaseDefinition",
+      "view": "ViewDefinition",
+      "viewpoint": "ViewpointDefinition"
+    },
+    "usages": {
+      "accept": "AcceptActionUsage",
+      "action": "ActionUsage",
+      "allocation": "AllocationUsage",
+      "allocate": "AllocateUsage",
+      "analysis": "AnalysisCaseUsage",
+      "actor": "ActorUsage",
+      "assume": "AssumeUsage",
+      "assert": "AssertUsage",
+      "attribute": "AttributeUsage",
+      "bind": "BindingConnectorAsUsage",
+      "calc": "CalculationUsage",
+      "cause": "CauseUsage",
+      "comment": "CommentUsage",
+      "concern": "ConcernUsage",
+      "connect": "ConnectionUsage",
+      "constraint": "ConstraintUsage",
+      "dependency": "DependencyUsage",
+      "end": "EndUsage",
+      "enum": "EnumerationUsage",
+      "exhibit": "ExhibitStateUsage",
+      "feature": "FeatureUsage",
+      "failure": "FailureUsage",
+      "filter": "FilterUsage",
+      "focus": "FocusUsage",
+      "for": "ForUsage",
+      "frame": "FrameUsage",
+      "flow": "FlowUsage",
+      "individual": "IndividualUsage",
+      "if": "IfUsage",
+      "interface": "InterfaceUsage",
+      "item": "ItemUsage",
+      "join": "JoinUsage",
+      "loop": "LoopUsage",
+      "merge": "MergeUsage",
+      "message": "MessageUsage",
+      "metadata": "MetadataUsage",
+      "objective": "ObjectiveUsage",
+      "occurrence": "OccurrenceUsage",
+      "part": "PartUsage",
+      "perform": "PerformActionUsage",
+      "port": "PortUsage",
+      "reference": "ReferenceUsage",
+      "require": "RequireUsage",
+      "requirement": "RequirementUsage",
+      "render": "RenderUsage",
+      "return": "ReturnUsage",
+      "satisfy": "SatisfyUsage",
+      "send": "SendUsage",
+      "situation": "SituationUsage",
+      "snapshot": "SnapshotUsage",
+      "state": "StateUsage",
+      "stakeholder": "StakeholderUsage",
+      "subject": "SubjectUsage",
+      "succession": "SuccessionUsage",
+      "timeslice": "TimesliceUsage",
+      "transition": "TransitionUsage",
+      "until": "UntilUsage",
+      "use-case": "UseCaseUsage",
+      "use": "UseUsage",
+      "verification": "VerificationUsage",
+      "verify": "VerifyUsage",
+      "view": "ViewUsage",
+      "viewpoint": "ViewpointUsage",
+      "rendering": "RenderingUsage"
+    }
+  },
+  "default_specialization_anchors": {
+    "packages": {
+      "Package": "KerML::Kernel::Package"
+    },
+    "definitions": {
+        "ActionDefinition": "SysML::Systems::ActionDefinition",
+      "AllocationDefinition": "SysML::Systems::AllocationDefinition",
+      "AnalysisCaseDefinition": "SysML::Systems::AnalysisCaseDefinition",
+      "AttributeDefinition": "SysML::Systems::AttributeDefinition",
+      "CalculationDefinition": "SysML::Systems::CalculationDefinition",
+      "ConjugatedPortDefinition": "SysML::Systems::ConjugatedPortDefinition",
+      "ConcernDefinition": "SysML::Systems::ConcernDefinition",
+      "ConnectionDefinition": "SysML::Systems::ConnectionDefinition",
+      "ConstraintDefinition": "SysML::Systems::ConstraintDefinition",
+      "EnumerationDefinition": "SysML::Systems::EnumerationDefinition",
+      "FlowDefinition": "SysML::Systems::FlowDefinition",
+        "InterfaceDefinition": "SysML::Systems::InterfaceDefinition",
+      "ItemDefinition": "SysML::Systems::ItemDefinition",
+      "MetadataDefinition": "SysML::Systems::MetadataDefinition",
+      "PartDefinition": "SysML::Systems::PartDefinition",
+      "PortDefinition": "SysML::Systems::PortDefinition",
+      "ConjugatedPortDefinition": "SysML::Systems::ConjugatedPortDefinition",
+      "RequirementDefinition": "SysML::Systems::RequirementDefinition",
+      "RenderingDefinition": "SysML::Systems::RenderingDefinition",
+      "StateDefinition": "SysML::Systems::StateDefinition",
+      "UseCaseDefinition": "SysML::Systems::UseCaseDefinition",
+      "VerificationCaseDefinition": "SysML::Systems::VerificationCaseDefinition",
+      "ViewDefinition": "SysML::Systems::ViewDefinition",
+      "ViewpointDefinition": "SysML::Systems::ViewpointDefinition"
+    },
+    "usages": {
+      "AcceptActionUsage": "SysML::Systems::AcceptActionUsage",
+      "ActionUsage": "SysML::Systems::ActionUsage",
+      "AttributeUsage": "SysML::Systems::AttributeUsage",
+      "ConnectionUsage": "SysML::Systems::ConnectionUsage",
+      "EnumerationUsage": "SysML::Systems::EnumerationUsage",
+      "ExhibitStateUsage": "SysML::Systems::ExhibitStateUsage",
+      "FlowUsage": "SysML::Systems::FlowUsage",
+      "ItemUsage": "SysML::Systems::ItemUsage",
+      "PartUsage": "SysML::Systems::PartUsage",
+      "PerformActionUsage": "SysML::Systems::PerformActionUsage",
+      "PortUsage": "SysML::Systems::PortUsage",
+      "ReferenceUsage": "SysML::Systems::ReferenceUsage",
+      "StateUsage": "SysML::Systems::StateUsage",
+      "SuccessionUsage": "SysML::Systems::SuccessionFlowUsage"
+    }
+  },
+  "semantic_specialization_defaults": {
+      "definitions": {
+        "ActionDefinition": [
+          "Actions::Action"
+        ],
+        "AnalysisCaseDefinition": [
+          "AnalysisCases::AnalysisCase"
+        ],
+        "AttributeDefinition": [
+          "Base::DataValue"
+        ],
+      "ConnectionDefinition": [
+        "Connections::BinaryConnection"
+      ],
+      "EnumerationDefinition": [
+        "Base::DataValue"
+      ],
+      "ItemDefinition": [
+        "Items::Item"
+      ],
+      "PartDefinition": [
+        "Parts::Part"
+      ],
+      "PortDefinition": [
+        "Ports::Port"
+      ]
+    },
+    "usages": {
+      "AttributeUsage": [
+        "Base::dataValues"
+      ],
+      "EnumerationUsage": [
+        "Base::dataValues"
+      ],
+      "ItemUsage": [
+        "Items::items"
+      ],
+      "PartUsage": [
+        "Items::Item::subparts"
+      ],
+      "PortUsage": [
+        "Parts::Part::ownedPorts"
+      ],
+      "ReferenceUsage": [
+        "Parts::parts"
+      ]
+    }
+  },
+  "usage_semantic_specialization_overrides": {
+    "usages": {
+      "PartUsage": {
+        "end-source": [
+          "Parts::parts",
+          "Connections::BinaryConnection::source"
+        ],
+        "end-target": [
+          "Parts::parts",
+          "Connections::BinaryConnection::target"
+        ],
+        "ref": [
+          "Parts::parts"
+        ]
+      },
+      "ReferenceUsage": {
+        "end-source": [
+          "Connections::BinaryConnection::source"
+        ],
+        "end-target": [
+          "Connections::BinaryConnection::target"
+        ]
+      }
+    }
+  },
+  "stdlib_aliases": {
+      "ids": {
+        "ISQ::DurationValue": "ISQBase::DurationValue",
+        "ISQ::TimeValue": "ISQBase::DurationValue",
+        "ISQ::LengthValue": "ISQBase::LengthValue",
+        "length": "ISQBase::length",
+        "ISQ::length": "ISQBase::length",
+        "ISQ::distance": "ISQSpaceTime::distance",
+        "ISQ::speed": "ISQSpaceTime::speed",
+        "ISQ::acceleration": "ISQSpaceTime::acceleration",
+        "ISQ::angularMeasure": "ISQSpaceTime::angularMeasure",
+        "distance": "ISQSpaceTime::distance",
+        "speed": "ISQSpaceTime::speed",
+        "acceleration": "ISQSpaceTime::acceleration",
+        "angularMeasure": "ISQSpaceTime::angularMeasure",
+        "ISQ::volume": "ISQSpaceTime::volume",
+        "volume": "ISQSpaceTime::volume",
+        "ISQ::time": "ISQBase::duration",
+        "ISQ::duration": "ISQBase::duration",
+        "time": "ISQBase::duration",
+        "duration": "ISQBase::duration",
+        "ISQ::MassValue": "ISQBase::MassValue",
+        "mass": "ISQBase::mass",
+        "ISQ::mass": "ISQBase::mass",
+        "ISQ::PowerValue": "ISQMechanics::PowerValue",
+        "ISQ::TorqueValue": "ISQMechanics::TorqueValue",
+        "power": "ISQMechanics::power",
+        "force": "ISQMechanics::force",
+        "momentOfInertia": "ISQMechanics::momentOfInertia",
+        "torque": "ISQMechanics::torque",
+        "ISQ::power": "ISQMechanics::power",
+        "ISQ::force": "ISQMechanics::force",
+        "ISQ::momentOfInertia": "ISQMechanics::momentOfInertia",
+        "ISQ::torque": "ISQMechanics::torque",
+        "electricPotential": "ISQElectromagnetism::electricPotential",
+        "electricCurrent": "ISQBase::electricCurrent",
+        "resistance": "ISQElectromagnetism::resistance",
+        "inductance": "ISQElectromagnetism::inductance",
+        "electricCharge": "ISQElectromagnetism::electricCharge",
+        "ISQ::electricPotential": "ISQElectromagnetism::electricPotential",
+        "ISQ::electricCurrent": "ISQBase::electricCurrent",
+        "ISQ::resistance": "ISQElectromagnetism::resistance",
+        "ISQ::inductance": "ISQElectromagnetism::inductance",
+        "ISQ::electricCharge": "ISQElectromagnetism::electricCharge",
+        "ISQ::TemperatureValue": "ISQBase::ThermodynamicTemperatureValue",
+        "temperature": "ISQBase::thermodynamicTemperature",
+        "ISQ::temperature": "ISQBase::thermodynamicTemperature",
+        "TemperatureValue": "ISQBase::ThermodynamicTemperatureValue",
+        "ShapeItems::Box": "ShapeItems::RectangularCuboid",
+        "mi": "USCustomaryUnits::mile",
+        "isq::L": "ISQBase::'International System of Quantities'::L",
+        "TimeValue": "ISQBase::DurationValue"
+    }
+  },
+  "constructs": [
+    {
+      "construct": "Package",
+      "metaclass": "SysML::Package",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 183
+    },
+    {
+      "construct": "LibraryPackage",
+      "metaclass": "SysML::LibraryPackage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 188
+    },
+    {
+      "construct": "Import",
+      "metaclass": "SysML::Import",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 246
+    },
+    {
+      "construct": "MembershipImport",
+      "metaclass": "SysML::MembershipImport",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 251
+    },
+    {
+      "construct": "NamespaceImport",
+      "metaclass": "SysML::NamespaceImport",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 260
+    },
+    {
+      "construct": "Namespace",
+      "metaclass": "SysML::Namespace",
+      "grammar_file": "KerML.xtext",
+      "grammar_line": 102
+    },
+    {
+      "construct": "ItemDefinition",
+      "metaclass": "SysML::ItemDefinition",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 915
+    },
+    {
+      "construct": "ItemUsage",
+      "metaclass": "SysML::ItemUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 919
+    },
+    {
+      "construct": "AttributeDefinition",
+      "metaclass": "SysML::AttributeDefinition",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 748
+    },
+    {
+      "construct": "AttributeUsage",
+      "metaclass": "SysML::AttributeUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 752
+    },
+    {
+      "construct": "EnumerationDefinition",
+      "metaclass": "SysML::EnumerationDefinition",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 769
+    },
+    {
+      "construct": "EnumerationUsage",
+      "metaclass": "SysML::EnumerationUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 790
+    },
+    {
+      "construct": "PartDefinition",
+      "metaclass": "SysML::PartDefinition",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 937
+    },
+    {
+      "construct": "PartUsage",
+      "metaclass": "SysML::PartUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 941
+    },
+    {
+      "construct": "PortDefinition",
+      "metaclass": "SysML::PortDefinition",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 957
+    },
+    {
+      "construct": "ConjugatedPortDefinition",
+      "metaclass": "SysML::ConjugatedPortDefinition"
+    },
+    {
+      "construct": "InterfaceDefinition",
+      "metaclass": "SysML::InterfaceDefinition"
+    },
+    {
+      "construct": "ActionDefinition",
+      "metaclass": "SysML::ActionDefinition",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1399
+    },
+    {
+      "construct": "AllocationDefinition",
+      "metaclass": "SysML::AllocationDefinition"
+    },
+    {
+      "construct": "AnalysisCaseDefinition",
+      "metaclass": "SysML::AnalysisCaseDefinition"
+    },
+    {
+      "construct": "CalculationDefinition",
+      "metaclass": "SysML::CalculationDefinition"
+    },
+    {
+      "construct": "CommentDefinition",
+      "metaclass": "SysML::CommentDefinition"
+    },
+    {
+      "construct": "ConnectionDefinition",
+      "metaclass": "SysML::ConnectionDefinition"
+    },
+    {
+      "construct": "ConstraintDefinition",
+      "metaclass": "SysML::ConstraintDefinition"
+    },
+    {
+      "construct": "MetadataDefinition",
+      "metaclass": "SysML::MetadataDefinition"
+    },
+    {
+      "construct": "OccurrenceDefinition",
+      "metaclass": "SysML::OccurrenceDefinition"
+    },
+    {
+      "construct": "RequirementDefinition",
+      "metaclass": "SysML::RequirementDefinition"
+    },
+    {
+      "construct": "ScenarioDefinition",
+      "metaclass": "SysML::ScenarioDefinition"
+    },
+    {
+      "construct": "FlowDefinition",
+      "metaclass": "SysML::FlowDefinition"
+    },
+    {
+      "construct": "IndividualDefinition",
+      "metaclass": "SysML::IndividualDefinition"
+    },
+    {
+      "construct": "StateDefinition",
+      "metaclass": "SysML::StateDefinition",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1821
+    },
+    {
+      "construct": "UseCaseDefinition",
+      "metaclass": "SysML::UseCaseDefinition"
+    },
+    {
+      "construct": "VerificationCaseDefinition",
+      "metaclass": "SysML::VerificationCaseDefinition"
+    },
+    {
+      "construct": "ViewDefinition",
+      "metaclass": "SysML::ViewDefinition"
+    },
+    {
+      "construct": "ViewpointDefinition",
+      "metaclass": "SysML::ViewpointDefinition"
+    },
+    {
+      "construct": "PortUsage",
+      "metaclass": "SysML::PortUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 988
+    },
+    {
+      "construct": "ReferenceUsage",
+      "metaclass": "SysML::ReferenceUsage"
+    },
+    {
+      "construct": "EndUsage",
+      "metaclass": "SysML::EndUsage"
+    },
+    {
+      "construct": "LoopUsage",
+      "metaclass": "SysML::LoopUsage"
+    },
+    {
+      "construct": "SendUsage",
+      "metaclass": "SysML::SendUsage"
+    },
+    {
+      "construct": "SituationUsage",
+      "metaclass": "SysML::SituationUsage"
+    },
+    {
+      "construct": "SnapshotUsage",
+      "metaclass": "SysML::SnapshotUsage"
+    },
+    {
+      "construct": "UntilUsage",
+      "metaclass": "SysML::UntilUsage"
+    },
+    {
+      "construct": "ActionUsage",
+      "metaclass": "SysML::ActionUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1407
+    },
+    {
+      "construct": "PerformActionUsage",
+      "metaclass": "SysML::PerformActionUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1411
+    },
+    {
+      "construct": "AcceptActionUsage",
+      "metaclass": "SysML::AcceptActionUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1442
+    },
+    {
+      "construct": "StateUsage",
+      "metaclass": "SysML::StateUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1832
+    },
+    {
+      "construct": "ExhibitStateUsage",
+      "metaclass": "SysML::ExhibitStateUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1840
+    },
+    {
+      "construct": "ActorUsage",
+      "metaclass": "SysML::ActorUsage"
+    },
+    {
+      "construct": "AssumeUsage",
+      "metaclass": "SysML::AssumeUsage"
+    },
+    {
+      "construct": "BindingConnectorAsUsage",
+      "metaclass": "SysML::BindingConnectorAsUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1020
+    },
+    {
+      "construct": "AllocationUsage",
+      "metaclass": "SysML::AllocationUsage"
+    },
+    {
+      "construct": "AllocateUsage",
+      "metaclass": "SysML::AllocateUsage"
+    },
+    {
+      "construct": "AnalysisCaseUsage",
+      "metaclass": "SysML::AnalysisCaseUsage"
+    },
+    {
+      "construct": "AssertUsage",
+      "metaclass": "SysML::AssertUsage"
+    },
+    {
+      "construct": "CalculationUsage",
+      "metaclass": "SysML::CalculationUsage"
+    },
+    {
+      "construct": "CauseUsage",
+      "metaclass": "SysML::CauseUsage"
+    },
+    {
+      "construct": "CommentUsage",
+      "metaclass": "SysML::CommentUsage"
+    },
+    {
+      "construct": "RenderingDefinition",
+      "metaclass": "SysML::RenderingDefinition"
+    },
+    {
+      "construct": "ConcernDefinition",
+      "metaclass": "SysML::ConcernDefinition"
+    },
+    {
+      "construct": "ConcernUsage",
+      "metaclass": "SysML::ConcernUsage"
+    },
+    {
+      "construct": "ConnectionUsage",
+      "metaclass": "SysML::ConnectionUsage"
+    },
+    {
+      "construct": "ConstraintUsage",
+      "metaclass": "SysML::ConstraintUsage"
+    },
+    {
+      "construct": "DependencyUsage",
+      "metaclass": "SysML::DependencyUsage"
+    },
+    {
+      "construct": "FlowUsage",
+      "metaclass": "SysML::FlowUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1269
+    },
+    {
+      "construct": "IndividualUsage",
+      "metaclass": "SysML::IndividualUsage"
+    },
+    {
+      "construct": "FrameUsage",
+      "metaclass": "SysML::FrameUsage"
+    },
+    {
+      "construct": "IfUsage",
+      "metaclass": "SysML::IfUsage"
+    },
+    {
+      "construct": "FilterUsage",
+      "metaclass": "SysML::FilterUsage"
+    },
+    {
+      "construct": "FailureUsage",
+      "metaclass": "SysML::FailureUsage"
+    },
+    {
+      "construct": "FocusUsage",
+      "metaclass": "SysML::FocusUsage"
+    },
+    {
+      "construct": "ForUsage",
+      "metaclass": "SysML::ForUsage"
+    },
+    {
+      "construct": "MetadataUsage",
+      "metaclass": "SysML::MetadataUsage"
+    },
+    {
+      "construct": "JoinUsage",
+      "metaclass": "SysML::JoinUsage"
+    },
+    {
+      "construct": "MergeUsage",
+      "metaclass": "SysML::MergeUsage"
+    },
+    {
+      "construct": "MessageUsage",
+      "metaclass": "SysML::MessageUsage"
+    },
+    {
+      "construct": "ObjectiveUsage",
+      "metaclass": "SysML::ObjectiveUsage"
+    },
+    {
+      "construct": "OccurrenceUsage",
+      "metaclass": "SysML::OccurrenceUsage"
+    },
+    {
+      "construct": "RequireUsage",
+      "metaclass": "SysML::RequireUsage"
+    },
+    {
+      "construct": "RequirementUsage",
+      "metaclass": "SysML::RequirementUsage"
+    },
+    {
+      "construct": "RenderUsage",
+      "metaclass": "SysML::RenderUsage"
+    },
+    {
+      "construct": "ReturnUsage",
+      "metaclass": "SysML::ReturnUsage"
+    },
+    {
+      "construct": "SatisfyUsage",
+      "metaclass": "SysML::SatisfyUsage"
+    },
+    {
+      "construct": "StakeholderUsage",
+      "metaclass": "SysML::StakeholderUsage"
+    },
+    {
+      "construct": "TransitionUsage",
+      "metaclass": "SysML::TransitionUsage",
+      "grammar_file": "SysML.xtext",
+      "grammar_line": 1854
+    },
+    {
+      "construct": "SubjectUsage",
+      "metaclass": "SysML::SubjectUsage"
+    },
+    {
+      "construct": "TimesliceUsage",
+      "metaclass": "SysML::TimesliceUsage"
+    },
+    {
+      "construct": "UseCaseUsage",
+      "metaclass": "SysML::UseCaseUsage"
+    },
+    {
+      "construct": "VerificationUsage",
+      "metaclass": "SysML::VerificationUsage"
+    },
+    {
+      "construct": "VerifyUsage",
+      "metaclass": "SysML::VerifyUsage"
+    },
+    {
+      "construct": "UseUsage",
+      "metaclass": "SysML::UseUsage"
+    },
+    {
+      "construct": "ViewpointUsage",
+      "metaclass": "SysML::ViewpointUsage"
+    },
+    {
+      "construct": "ViewUsage",
+      "metaclass": "SysML::ViewUsage"
+    },
+    {
+      "construct": "InterfaceUsage",
+      "metaclass": "SysML::InterfaceUsage"
+    },
+    {
+      "construct": "RenderingUsage",
+      "metaclass": "SysML::RenderingUsage"
+    },
+    {
+      "construct": "SuccessionUsage",
+      "metaclass": "SysML::SuccessionUsage"
+    },
+    {
+      "construct": "FeatureDefinition",
+      "metaclass": "KerML::FeatureDefinition"
+    },
+    {
+      "construct": "Classifier",
+      "metaclass": "KerML::Classifier"
+    },
+    {
+      "construct": "FeatureUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "AgeUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "ConnectorUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "DeclarationUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "DisjointUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "ExprUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "FeaturingUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "InvUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "InverseUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "LocaleUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "MetaclassUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "RedefinitionUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "SpecializationUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "StepUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "SubsetUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "TighteningTorqueUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "TypeUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "VarUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "VUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "YUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "BindingUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "ConjugationUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "FunctionDefinition",
+      "metaclass": "KerML::Classifier"
+    },
+    {
+      "construct": "InvertingUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "LanguageUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "SubclassifierUsage",
+      "metaclass": "KerML::Feature"
+    },
+    {
+      "construct": "SubtypeUsage",
+      "metaclass": "KerML::Feature"
+    }
+  ]
+}

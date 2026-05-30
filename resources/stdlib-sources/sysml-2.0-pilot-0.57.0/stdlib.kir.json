@@ -1,0 +1,237 @@
+{
+  "elements": [
+    {
+      "id": "kerml.Anything",
+      "kind": "kerml.Classifier",
+      "layer": 0,
+      "properties": {
+        "doc": {
+          "blocks": [
+            {
+              "kind": "comment",
+              "text": "Anything is the top level generalized type in the language."
+            }
+          ],
+          "source": "pilot"
+        },
+        "pilot_library_group": "Kernel Libraries",
+        "source_file": "Kernel Libraries/Kernel Semantic Library/Base.kerml",
+        "source_span": {
+          "end_line": 18,
+          "start_line": 8
+        }
+      }
+    },
+    {
+      "id": "kerml.Feature",
+      "kind": "kerml.Metaclass",
+      "layer": 0,
+      "properties": {
+        "pilot_library_group": "Kernel Libraries",
+        "source_file": "Kernel Libraries/Kernel Semantic Library/KerML.kerml",
+        "source_span": {
+          "end_line": 188,
+          "start_line": 164
+        },
+        "specializes": [
+          "kerml.Type"
+        ]
+      }
+    },
+    {
+      "id": "kerml.Relationship",
+      "kind": "kerml.Metaclass",
+      "layer": 0,
+      "properties": {
+        "pilot_library_group": "Kernel Libraries",
+        "source_file": "Kernel Libraries/Kernel Semantic Library/KerML.kerml",
+        "source_span": {
+          "end_line": 110,
+          "start_line": 106
+        }
+      }
+    },
+    {
+      "id": "kerml.Type",
+      "kind": "kerml.Metaclass",
+      "layer": 0,
+      "properties": {
+        "pilot_library_group": "Kernel Libraries",
+        "source_file": "Kernel Libraries/Kernel Semantic Library/KerML.kerml",
+        "source_span": {
+          "end_line": 281,
+          "start_line": 256
+        }
+      }
+    },
+    {
+      "id": "sysml.Item",
+      "kind": "sysml.ItemDefinition",
+      "layer": 1,
+      "properties": {
+        "doc": {
+          "blocks": [
+            {
+              "kind": "comment",
+              "text": "Item is the most general class of objects that are part of, exist in or flow through a system. Item is the base type of all ItemDefinitions."
+            }
+          ],
+          "source": "pilot"
+        },
+        "pilot_library_group": "Systems Library",
+        "source_file": "Systems Library/Items.sysml",
+        "source_span": {
+          "end_line": 31,
+          "start_line": 24
+        },
+        "specializes": [
+          "kerml.Anything"
+        ]
+      }
+    },
+    {
+      "id": "sysml.DataValue",
+      "kind": "kerml.DataType",
+      "layer": 1,
+      "properties": {
+        "doc": {
+          "blocks": [
+            {
+              "kind": "comment",
+              "text": "DataValue is the general base type for value-like attributes in the minimal browser standard library."
+            }
+          ],
+          "source": "minimal"
+        },
+        "pilot_library_group": "Kernel Libraries",
+        "source_file": "Kernel Libraries/Kernel Semantic Library/Base.kerml",
+        "specializes": [
+          "kerml.Anything"
+        ]
+      }
+    },
+    {
+      "id": "sysml.ItemDefinition",
+      "kind": "sysml.MetadataDefinition",
+      "layer": 1,
+      "properties": {
+        "pilot_library_group": "Systems Library",
+        "source_file": "Systems Library/SysML.sysml",
+        "source_span": {
+          "end_line": 228,
+          "start_line": 228
+        },
+        "specializes": [
+          "kerml.Type"
+        ]
+      }
+    },
+    {
+      "id": "sysml.Part",
+      "kind": "sysml.PartDefinition",
+      "layer": 1,
+      "properties": {
+        "doc": {
+          "blocks": [
+            {
+              "kind": "comment",
+              "text": "Part is the most general class of objects that represent all or a part of a system. Part is the base type of all PartDefinitions."
+            }
+          ],
+          "source": "pilot"
+        },
+        "pilot_library_group": "Systems Library",
+        "source_file": "Systems Library/Parts.sysml",
+        "source_span": {
+          "end_line": 26,
+          "start_line": 19
+        },
+        "specializes": [
+          "sysml.Item"
+        ]
+      }
+    },
+    {
+      "id": "sysml.PartDefinition",
+      "kind": "sysml.MetadataDefinition",
+      "layer": 1,
+      "properties": {
+        "pilot_library_group": "Systems Library",
+        "source_file": "Systems Library/SysML.sysml",
+        "source_span": {
+          "end_line": 268,
+          "start_line": 268
+        },
+        "specializes": [
+          "sysml.ItemDefinition"
+        ]
+      }
+    },
+    {
+      "id": "sysml.Port",
+      "kind": "sysml.PortDefinition",
+      "layer": 1,
+      "properties": {
+        "doc": {
+          "blocks": [
+            {
+              "kind": "comment",
+              "text": "Port is the most general class of connection points for interacting with a Part."
+            }
+          ],
+          "source": "minimal"
+        },
+        "pilot_library_group": "Systems Library",
+        "source_file": "Systems Library/Ports.sysml",
+        "specializes": [
+          "sysml.Part"
+        ]
+      }
+    },
+    {
+      "id": "sysml.PortDefinition",
+      "kind": "sysml.MetadataDefinition",
+      "layer": 1,
+      "properties": {
+        "pilot_library_group": "Systems Library",
+        "source_file": "Systems Library/SysML.sysml",
+        "specializes": [
+          "sysml.PartDefinition"
+        ]
+      }
+    },
+    {
+      "id": "sysml.Interface",
+      "kind": "sysml.InterfaceDefinition",
+      "layer": 1,
+      "properties": {
+        "doc": {
+          "blocks": [
+            {
+              "kind": "comment",
+              "text": "Interface is the most general class of links between Ports on Parts."
+            }
+          ],
+          "source": "minimal"
+        },
+        "pilot_library_group": "Systems Library",
+        "source_file": "Systems Library/Interfaces.sysml",
+        "specializes": [
+          "kerml.Anything"
+        ]
+      }
+    },
+    {
+      "id": "sysml.InterfaceDefinition",
+      "kind": "sysml.MetadataDefinition",
+      "layer": 1,
+      "properties": {
+        "pilot_library_group": "Systems Library",
+        "source_file": "Systems Library/SysML.sysml",
+        "specializes": [
+          "kerml.Type"
+        ]
+      }
+    }
+  ]
+}

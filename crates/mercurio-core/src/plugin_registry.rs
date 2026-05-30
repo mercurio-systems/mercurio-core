@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::default_user_config_path;
+use crate::mpack::{
+    MpackLanguageProfile, MpackLibrary, MpackManifest, MpackPythonPackage, MpackRulepack,
+    validate_mpack_manifest,
+};
 
 #[derive(Debug)]
 pub enum PluginRegistryError {
@@ -26,6 +30,32 @@ impl std::error::Error for PluginRegistryError {}
 pub struct PluginInstallSource {
     pub manifest: Value,
     pub package_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledMpack {
+    pub manifest_path: PathBuf,
+    pub package_path: Option<PathBuf>,
+    pub manifest: MpackManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MpackAssetRef<T> {
+    pub manifest_id: String,
+    pub manifest_version: String,
+    pub manifest_path: PathBuf,
+    pub package_path: Option<PathBuf>,
+    pub asset_path: Option<PathBuf>,
+    pub entry: T,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MpackActivationIndex {
+    pub installed: Vec<InstalledMpack>,
+    pub libraries: Vec<MpackAssetRef<MpackLibrary>>,
+    pub language_profiles: Vec<MpackAssetRef<MpackLanguageProfile>>,
+    pub rulepacks: Vec<MpackAssetRef<MpackRulepack>>,
+    pub python_packages: Vec<MpackAssetRef<MpackPythonPackage>>,
 }
 
 pub fn plugin_registry_root(path: Option<PathBuf>) -> PathBuf {
@@ -192,6 +222,97 @@ pub fn installed_plugin_manifest_paths(root: &Path) -> Result<Vec<PathBuf>, Plug
     Ok(paths)
 }
 
+pub fn installed_mpack_manifests(root: &Path) -> Result<Vec<InstalledMpack>, PluginRegistryError> {
+    installed_plugin_manifest_paths(root)?
+        .into_iter()
+        .map(read_installed_mpack_manifest)
+        .collect()
+}
+
+pub fn mpack_activation_index(root: &Path) -> Result<MpackActivationIndex, PluginRegistryError> {
+    let installed = installed_mpack_manifests(root)?;
+    let mut index = MpackActivationIndex {
+        installed: installed.clone(),
+        ..MpackActivationIndex::default()
+    };
+
+    for installed_mpack in installed {
+        let base_dir = installed_mpack
+            .manifest_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let manifest_id = installed_mpack.manifest.id.clone();
+        let manifest_version = installed_mpack.manifest.version.clone();
+        let manifest_path = installed_mpack.manifest_path.clone();
+        let package_path = installed_mpack.package_path.clone();
+
+        for entry in installed_mpack.manifest.libraries {
+            index.libraries.push(MpackAssetRef {
+                manifest_id: manifest_id.clone(),
+                manifest_version: manifest_version.clone(),
+                manifest_path: manifest_path.clone(),
+                package_path: package_path.clone(),
+                asset_path: entry.path.as_deref().map(|path| base_dir.join(path)),
+                entry,
+            });
+        }
+        for entry in installed_mpack.manifest.language_profiles {
+            index.language_profiles.push(MpackAssetRef {
+                manifest_id: manifest_id.clone(),
+                manifest_version: manifest_version.clone(),
+                manifest_path: manifest_path.clone(),
+                package_path: package_path.clone(),
+                asset_path: Some(base_dir.join(&entry.path)),
+                entry,
+            });
+        }
+        for entry in installed_mpack.manifest.rulepacks {
+            index.rulepacks.push(MpackAssetRef {
+                manifest_id: manifest_id.clone(),
+                manifest_version: manifest_version.clone(),
+                manifest_path: manifest_path.clone(),
+                package_path: package_path.clone(),
+                asset_path: Some(base_dir.join(&entry.path)),
+                entry,
+            });
+        }
+        for entry in installed_mpack.manifest.python_packages {
+            index.python_packages.push(MpackAssetRef {
+                manifest_id: manifest_id.clone(),
+                manifest_version: manifest_version.clone(),
+                manifest_path: manifest_path.clone(),
+                package_path: package_path.clone(),
+                asset_path: Some(base_dir.join(&entry.path)),
+                entry,
+            });
+        }
+    }
+
+    Ok(index)
+}
+
+fn read_installed_mpack_manifest(path: PathBuf) -> Result<InstalledMpack, PluginRegistryError> {
+    let raw = read_plugin_manifest(&path)?;
+    let manifest: MpackManifest = serde_json::from_value(raw).map_err(|err| {
+        PluginRegistryError::Invalid(format!("invalid MPack manifest {}: {err}", path.display()))
+    })?;
+    validate_mpack_manifest(&manifest).map_err(|errors| {
+        let errors = errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("; ");
+        PluginRegistryError::Invalid(format!("invalid MPack manifest {}: {errors}", path.display()))
+    })?;
+    let package_path = path.with_file_name("plugin.mpack");
+    Ok(InstalledMpack {
+        manifest_path: path,
+        package_path: package_path.is_file().then_some(package_path),
+        manifest,
+    })
+}
+
 fn collect_installed_plugin_manifest_paths(
     current: &Path,
     paths: &mut Vec<PathBuf>,
@@ -341,6 +462,61 @@ mod tests {
             plugin_package_digest(&published).unwrap(),
             "fnv1a64:ba03c15973f83f90"
         );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mpack_activation_index_resolves_installed_assets() {
+        let root = temp_dir("mercurio-mpack-activation-core");
+        let manifest = serde_json::json!({
+            "id": "org.mercurio.sysml-stdlib-support",
+            "version": "2.0.0",
+            "name": "SysML Stdlib Support",
+            "libraries": [
+                {"id": "org.omg/sysml-stdlib", "path": "libraries/sysml.kpar"}
+            ],
+            "languageProfiles": [
+                {
+                    "id": "sysml-2.0",
+                    "path": "profiles/sysml/profile.json",
+                    "pythonWrappers": {
+                        "module": "mercurio_sysml",
+                        "path": "python"
+                    }
+                }
+            ],
+            "rulepacks": [
+                {"id": "stdlib", "path": "rules/stdlib.json"}
+            ],
+            "pythonPackages": [
+                {"module": "mercurio_sysml", "path": "python", "profile": "sysml-2.0"}
+            ]
+        });
+        let manifest_path = install_plugin_manifest(
+            &root.join("plugins"),
+            "org.mercurio.sysml-stdlib-support",
+            "2.0.0",
+            &manifest,
+            None,
+            false,
+        )
+        .unwrap();
+
+        let index = mpack_activation_index(&root.join("plugins")).unwrap();
+
+        assert_eq!(index.installed.len(), 1);
+        assert_eq!(index.language_profiles[0].entry.id, "sysml-2.0");
+        assert_eq!(
+            index.language_profiles[0].asset_path.as_ref().unwrap(),
+            &manifest_path
+                .parent()
+                .unwrap()
+                .join("profiles")
+                .join("sysml")
+                .join("profile.json")
+        );
+        assert_eq!(index.python_packages[0].entry.module, "mercurio_sysml");
 
         std::fs::remove_dir_all(root).unwrap();
     }

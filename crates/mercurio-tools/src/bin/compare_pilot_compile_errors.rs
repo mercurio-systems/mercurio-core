@@ -175,7 +175,7 @@ struct PilotCorpusSeed {
 impl PilotCorpusSeed {
     fn load() -> Result<Self, Box<dyn std::error::Error>> {
         Ok(serde_json::from_str(&std::fs::read_to_string(repo_path(
-            "mappings/l2/pilot_corpus.seed.json",
+            "crates/mercurio-tools/corpus/pilot_corpus.seed.json",
         ))?)?)
     }
 

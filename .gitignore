@@ -12,4 +12,4 @@ dist/
 **/.mercurio/cache/**
 
 /.idea/
-/artifacts/views/
+/artifacts/

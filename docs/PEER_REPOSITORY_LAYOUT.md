@@ -96,7 +96,7 @@ mercurio-examples/
 
   kir/
     snapshots/
-    fixtures/
+    test_files/
 
   scenarios/
     state_machine/
@@ -121,7 +121,7 @@ Owns:
 - demo scenarios
 - expected outputs for cross-repo regression checks
 
-Core may keep a small subset of examples in `mercurio-core/examples` when those
+Core may keep a small subset of examples in `mercurio-core/test_files/examples` when those
 examples are required for local tests, docs, or CLI smoke checks.
 
 ### `SysML-v2-Pilot-Implementation`
@@ -194,7 +194,7 @@ root = "../mercurio-examples"
 
 1. Do not vendor `SysML-v2-Pilot-Implementation` into `mercurio-core`.
 2. Do not commit generated Pilot comparison artifacts to core.
-3. Keep only small, stable fixtures in `mercurio-core/examples`.
+3. Keep only small, stable test files in `mercurio-core/test_files`.
 4. Put larger example corpora in `mercurio-examples`.
 5. Use environment variables or local config to locate peer repositories.
 6. Generated outputs belong in ignored directories such as `target/` or `.mercurio/cache/`.
@@ -206,7 +206,7 @@ root = "../mercurio-examples"
 2. Use `MERCURIO_PILOT_ROOT` or `MERCURIO_WORKSPACE_ROOT` for tools that compare against Pilot.
 3. Create `mercurio-examples` when the example corpus becomes too large or noisy for core.
 4. Move large examples and expected outputs from core to `mercurio-examples`.
-5. Keep a minimal smoke-test set in `mercurio-core/examples`.
+5. Keep a minimal smoke-test set in `mercurio-core/test_files/examples`.
 6. Keep upstream checkouts under `external/` once all tools use configured paths.
 
 ## Dependency Direction

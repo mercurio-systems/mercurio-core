@@ -5980,7 +5980,7 @@ mod tests {
     #[test]
     fn fixture_sysml_expression_compiles_and_evaluates_end_to_end() {
         let document = load_model_stack(&crate::paths::repo_path(
-            "fixtures/l2/expression_fixture.sysml",
+            "test_files/l2/expression_fixture.sysml",
         ))
         .unwrap();
         let runtime = Runtime::from_document(document).unwrap();

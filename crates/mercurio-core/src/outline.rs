@@ -811,7 +811,7 @@ mod tests {
             elements: vec![element(
                 "type.Demo.Vehicle",
                 "SysML::Systems::PartDefinition",
-                "fixtures/l2/minimal_vehicle.sysml",
+                "test_files/l2/minimal_vehicle.sysml",
                 (11, 3, 13, 3),
                 BTreeMap::new(),
             )],
@@ -840,7 +840,7 @@ mod tests {
                 element(
                     "pkg.Demo",
                     "SysML::Systems::Package",
-                    "fixtures/l2/minimal_vehicle.sysml",
+                    "test_files/l2/minimal_vehicle.sysml",
                     (1, 1, 20, 2),
                     BTreeMap::from([(
                         "declared_name".to_string(),
@@ -850,7 +850,7 @@ mod tests {
                 element(
                     "type.Demo.Vehicle",
                     "SysML::Systems::PartDefinition",
-                    "fixtures/l2/minimal_vehicle.sysml",
+                    "test_files/l2/minimal_vehicle.sysml",
                     (3, 3, 10, 4),
                     BTreeMap::from([
                         (
@@ -863,7 +863,7 @@ mod tests {
                 element(
                     "feature.Demo.Vehicle.engine",
                     "SysML::Systems::PartUsage",
-                    "fixtures/l2/minimal_vehicle.sysml",
+                    "test_files/l2/minimal_vehicle.sysml",
                     (5, 5, 5, 22),
                     BTreeMap::from([
                         (

@@ -4,6 +4,7 @@ pub mod behavior;
 pub mod constraints;
 pub mod datalog;
 pub mod derived;
+pub mod element_view;
 pub mod expression;
 pub mod feasibility;
 pub mod frontend;
@@ -15,6 +16,7 @@ pub mod library;
 pub mod logging;
 pub mod metadata;
 pub mod metamodel;
+pub mod mpack;
 pub mod mutation;
 pub mod outline;
 pub mod paths;
@@ -22,9 +24,11 @@ pub mod plugin_registry;
 pub mod project;
 pub mod project_cache;
 pub mod proposal;
+pub mod python_codegen;
 pub mod query;
 pub mod runtime;
 pub mod semantic_compare;
+pub mod semantic_target;
 pub mod simulation;
 pub mod source_set;
 pub mod syntax_compare;
@@ -63,6 +67,7 @@ pub use datalog::{
     materialize_core_indexes,
 };
 pub use derived::{DerivedPropertySource, DerivedPropertyValue, derived_properties};
+pub use element_view::ElementView;
 pub use expression::{
     BinaryExpressionOp, ExpressionEvaluationContext, ExpressionEvaluationError, ExpressionIr,
     ExpressionIrError, ExpressionPathRoot, ExpressionPathSegment, ExpressionValidationError,
@@ -140,11 +145,18 @@ pub use paths::{
     default_package_repo_path, default_stdlib_path, default_stdlib_rulepack_path,
     default_user_config_path, default_workspace_root, repo_path, repo_root,
 };
+pub use mpack::{
+    MpackLanguageProfile, MpackLibrary, MpackManifest, MpackPythonPackage,
+    MpackPythonWrapperBinding, MpackRequirements, MpackRulepack, MpackService,
+    MpackValidationError, validate_mpack_manifest,
+};
 pub use plugin_registry::{
+    InstalledMpack, MpackActivationIndex, MpackAssetRef,
     PluginInstallSource as RegistryPluginInstallSource, PluginRegistryError,
-    default_plugin_registry_root, install_plugin_manifest, installed_plugin_manifest_paths,
-    plugin_manifest_dir, plugin_package_digest, plugin_registry_root, publish_plugin_package,
-    read_plugin_install_source, read_plugin_manifest as read_registry_plugin_manifest,
+    default_plugin_registry_root, install_plugin_manifest, installed_mpack_manifests,
+    installed_plugin_manifest_paths, mpack_activation_index, plugin_manifest_dir,
+    plugin_package_digest, plugin_registry_root, publish_plugin_package, read_plugin_install_source,
+    read_plugin_manifest as read_registry_plugin_manifest,
 };
 pub use project::{
     PROJECT_DESCRIPTOR_FILE_NAME, ProjectDescriptor, ProjectDescriptorError, ProjectLibraryConfig,
@@ -160,6 +172,7 @@ pub use proposal::{
     Proposal, ProposalStatus, PullRequestBinding, PullRequestState, SemanticImpact,
     SemanticImpactStatus, SemanticImpactSummary,
 };
+pub use python_codegen::{PythonWrapperGeneration, generate_python_wrappers};
 pub use query::{
     FilterExpr, OrderBy, Projection, Query, QueryEngine, QueryError, QueryResultSet, QuerySource,
     SortDirection, TermPattern, TriplePattern, parse_query,
@@ -170,6 +183,10 @@ pub use semantic_compare::{
     SemanticSnapshotAttribute, SemanticSnapshotElement, SemanticSourceSpan, SemanticValueMismatch,
     SnapshotMode, build_semantic_snapshot, build_semantic_snapshot_with_registry,
     compare_snapshots,
+};
+pub use semantic_target::{
+    IncludeSubtypes, ResolvedSemanticTarget, SemanticTarget, SemanticTargetError,
+    SemanticTargetResolver, TargetLayers,
 };
 pub use syntax_compare::{
     SyntaxComparisonReport, SyntaxNodeMismatch, SyntaxSnapshot, SyntaxSnapshotNode,
