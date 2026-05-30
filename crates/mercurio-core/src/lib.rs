@@ -31,6 +31,7 @@ pub mod query;
 pub mod runtime;
 pub mod semantic_compare;
 pub mod semantic_target;
+pub mod session;
 pub mod simulation;
 pub mod source_set;
 pub mod syntax_compare;
@@ -198,6 +199,10 @@ pub use semantic_compare::{
 pub use semantic_target::{
     IncludeSubtypes, ResolvedSemanticTarget, SemanticTarget, SemanticTargetError,
     SemanticTargetResolver, TargetLayers,
+};
+pub use session::{
+    CommitMode, CommitResult, CommitStrategy, ForkElement, KirOverlay, ModelFork, ModelSession,
+    ModelWorkspace, SessionError, WorkspaceSnapshot,
 };
 pub use syntax_compare::{
     SyntaxComparisonReport, SyntaxNodeMismatch, SyntaxSnapshot, SyntaxSnapshotNode,

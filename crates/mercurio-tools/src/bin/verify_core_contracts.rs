@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use mercurio_core::{
-    CURRENT_DEFAULT_PROFILE_ID, CoreMutationFeasibilityService, ElementRef, Graph, KirDocument,
-    KirElement, LocalPackageRepository, MutationContext, MutationFeasibilityService,
-    MutationProposal, SemanticConcept, SemanticMutation, compile_sysml_text,
+    CURRENT_DEFAULT_PROFILE_ID, CommitMode, CommitStrategy, CoreMutationFeasibilityService,
+    ElementRef, Graph, KirDocument, KirElement, LocalPackageRepository, ModelWorkspace,
+    MutationContext, MutationFeasibilityService, MutationProposal, SemanticConcept,
+    SemanticMutation, SessionError, WorkspaceSnapshot, compile_sysml_text,
     default_language_profile, default_metamodel_registry, default_stdlib_path, diff_kir_documents,
     elements_with_metadata, generate_python_wrappers, load_authoring_project_from_sysml,
     load_language_profile, requirement_traces, workspace_revision_for_kir_document,
@@ -91,6 +92,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     verify_metadata_round_trip()?;
+    verify_session_fork_contract()?;
 
     println!("core contracts: ok");
     Ok(())
@@ -197,6 +199,50 @@ package Demo {
             .iter()
             .any(|trace| trace.source == "case.verifySafeStart"),
         "requirement trace query follows verification relationships".to_string(),
+    )?;
+
+    Ok(())
+}
+
+fn verify_session_fork_contract() -> Result<(), Box<dyn std::error::Error>> {
+    let base = KirDocument {
+        metadata: BTreeMap::new(),
+        elements: Vec::new(),
+    };
+    let workspace = ModelWorkspace::new(WorkspaceSnapshot::new(base)?);
+    let first_session = workspace.session();
+    let second_session = workspace.session();
+
+    let mut fork = first_session.fork("verify generated requirements");
+    let package = fork.package("GeneratedRequirements", None)?;
+    for index in 0..128 {
+        fork.requirement(
+            &package,
+            format!("Req{index:05}"),
+            format!("Generated requirement {index:05}"),
+        )?;
+    }
+    check(
+        fork.overlay().added_elements.len() == 129,
+        "session fork stores bulk additions in an overlay".to_string(),
+    )?;
+    let result = fork.commit(CommitMode::PreserveSource)?;
+    check(
+        result.strategy_used == CommitStrategy::GeneratedCompanionFiles
+            && result
+                .edited_files
+                .contains_key("generated/generated_requirements.sysml"),
+        "preserve-source bulk commit emits a generated companion file".to_string(),
+    )?;
+
+    let mut stale = second_session.fork("stale session");
+    stale.package("StalePackage", None)?;
+    check(
+        matches!(
+            stale.commit(CommitMode::RewriteSource),
+            Err(SessionError::StaleWorkspace { .. })
+        ),
+        "stale session commit is rejected".to_string(),
     )?;
 
     Ok(())
